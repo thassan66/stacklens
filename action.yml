@@ -1,0 +1,37 @@
+name: stacklens
+description: Scan a repository with stacklens and write JSON or SARIF output.
+
+inputs:
+  path:
+    description: Path to scan, relative to the workflow workspace.
+    required: false
+    default: "."
+  output-format:
+    description: Output format to write. Use json or sarif.
+    required: false
+    default: "sarif"
+  output-file:
+    description: Report output path. Relative paths are resolved from the workflow workspace.
+    required: false
+    default: "stacklens.sarif"
+  fail-on:
+    description: Optional severity threshold that fails the action. Use high, medium, or low.
+    required: false
+    default: ""
+
+outputs:
+  report-path:
+    description: Absolute path to the generated report file.
+    value: ${{ steps.stacklens.outputs.report-path }}
+
+runs:
+  using: composite
+  steps:
+    - id: stacklens
+      shell: bash
+      env:
+        INPUT_PATH: ${{ inputs.path }}
+        INPUT_OUTPUT_FORMAT: ${{ inputs.output-format }}
+        INPUT_OUTPUT_FILE: ${{ inputs.output-file }}
+        INPUT_FAIL_ON: ${{ inputs.fail-on }}
+      run: node "$GITHUB_ACTION_PATH/src/action.js"

@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
-import { mkdtemp, mkdir, writeFile } from "node:fs/promises";
+import { readFileSync } from "node:fs";
+import { mkdtemp, mkdir, readFile, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { test } from "node:test";
@@ -166,6 +167,90 @@ test("CLI fail threshold applies to SARIF output", async () => {
       assert.equal(sarif.version, "2.1.0");
       assert.ok(sarif.runs[0].results.some((result) => result.ruleId === "node-lifecycle-script"));
       assert.equal(error.code, 1);
+      return true;
+    }
+  );
+});
+
+test("GitHub Action runner writes a SARIF report", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "stacklens-"));
+  const githubOutput = path.join(root, "github-output.txt");
+  const reportPath = path.join(root, "reports", "stacklens.sarif");
+  await writeFile(
+    path.join(root, "package.json"),
+    JSON.stringify({
+      scripts: {
+        postinstall: "node scripts/setup.js"
+      }
+    })
+  );
+
+  const result = await execFileAsync(process.execPath, [path.resolve("src", "action.js")], {
+    env: {
+      ...process.env,
+      GITHUB_WORKSPACE: root,
+      GITHUB_OUTPUT: githubOutput,
+      INPUT_PATH: ".",
+      INPUT_OUTPUT_FORMAT: "sarif",
+      INPUT_OUTPUT_FILE: reportPath
+    }
+  });
+  const sarif = JSON.parse(await readFile(reportPath, "utf8"));
+  const output = await readFile(githubOutput, "utf8");
+
+  assert.equal(result.stderr, "");
+  assert.equal(sarif.version, "2.1.0");
+  assert.ok(sarif.runs[0].results.some((item) => item.ruleId === "node-lifecycle-script"));
+  assert.match(output, new RegExp(`report-path=${escapeRegExp(reportPath)}`));
+});
+
+test("GitHub Action runner preserves report output when fail threshold matches", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "stacklens-"));
+  const githubOutput = path.join(root, "github-output.txt");
+  const reportPath = path.join(root, "stacklens.json");
+  await writeFile(
+    path.join(root, "package.json"),
+    JSON.stringify({
+      scripts: {
+        postinstall: "node scripts/setup.js"
+      }
+    })
+  );
+
+  await assert.rejects(
+    execFileAsync(process.execPath, [path.resolve("src", "action.js")], {
+      env: {
+        ...process.env,
+        GITHUB_WORKSPACE: root,
+        GITHUB_OUTPUT: githubOutput,
+        INPUT_PATH: ".",
+        INPUT_OUTPUT_FORMAT: "json",
+        INPUT_OUTPUT_FILE: reportPath,
+        INPUT_FAIL_ON: "high"
+      }
+    }),
+    (error) => {
+      const report = JSON.parse(readFileSync(reportPath, "utf8"));
+      assert.equal(error.code, 1);
+      assert.equal(report.summary.high, 1);
+      return true;
+    }
+  );
+});
+
+test("GitHub Action runner validates output format", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "stacklens-"));
+
+  await assert.rejects(
+    execFileAsync(process.execPath, [path.resolve("src", "action.js")], {
+      env: {
+        ...process.env,
+        GITHUB_WORKSPACE: root,
+        INPUT_OUTPUT_FORMAT: "xml"
+      }
+    }),
+    (error) => {
+      assert.match(error.stderr, /output-format must be one of/);
       return true;
     }
   );
@@ -343,3 +428,7 @@ test("dashboard asset resolver handles query strings and blocks traversal", () =
   assert.equal(resolveAssetPath("/%2e%2e/src/server.js"), null);
   assert.equal(resolveAssetPath("/%"), null);
 });
+
+function escapeRegExp(value) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}

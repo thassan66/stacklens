@@ -66,6 +66,35 @@ Options:
 - `--no-open`: start dashboard but do not open the browser
 - `--help`: show help
 
+## GitHub Action
+
+```yaml
+name: stacklens
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    permissions:
+      security-events: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: thassan66/stacklens@main
+        with:
+          path: .
+          output-format: sarif
+          output-file: stacklens.sarif
+          fail-on: high
+      - uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: stacklens.sarif
+```
+
 ## Why this exists
 
 Most tools are either linters, vulnerability scanners, or heavyweight platforms. `stacklens` aims to be a fast local lens into the things teams actually ask when they open a repo:
@@ -123,7 +152,6 @@ Most tools are either linters, vulnerability scanners, or heavyweight platforms.
 - PR diff mode
 - rule documentation pages
 - plugin API
-- GitHub Action
 - desktop app packaging
 
 ## License
