@@ -18,9 +18,13 @@ export function startDashboard(report, port) {
         return;
       }
 
-      const asset = request.url === "/" ? "index.html" : request.url.replace(/^\//, "");
-      const safeAsset = path.normalize(asset).replace(/^(\.\.(\/|\\|$))+/, "");
-      const filePath = path.join(publicDir, safeAsset);
+      const filePath = resolveAssetPath(request.url ?? "/");
+      if (!filePath) {
+        response.writeHead(404, { "Content-Type": "text/plain; charset=utf-8" });
+        response.end("Not found");
+        return;
+      }
+
       const content = await readFile(filePath);
       response.writeHead(200, { "Content-Type": contentType(filePath) });
       response.end(content);
@@ -37,6 +41,30 @@ export function startDashboard(report, port) {
       resolve(server);
     });
   });
+}
+
+export function resolveAssetPath(rawUrl) {
+  let rawPathname;
+  let pathname;
+  try {
+    rawPathname = String(rawUrl).split(/[?#]/, 1)[0];
+    if (decodeURIComponent(rawPathname).split(/[\\/]+/).includes("..")) {
+      return null;
+    }
+    pathname = decodeURIComponent(new URL(rawUrl, "http://127.0.0.1").pathname);
+  } catch {
+    return null;
+  }
+
+  const asset = pathname === "/" ? "index.html" : pathname.replace(/^\/+/, "");
+  const filePath = path.resolve(publicDir, asset);
+  const relativePath = path.relative(publicDir, filePath);
+
+  if (relativePath.startsWith("..") || path.isAbsolute(relativePath)) {
+    return null;
+  }
+
+  return filePath;
 }
 
 function contentType(filePath) {

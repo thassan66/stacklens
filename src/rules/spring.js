@@ -1,30 +1,40 @@
 export function scanSpring(context) {
-  const build = detectBuild(context);
+  const builds = detectBuilds(context);
   const configFiles = context.files.filter((file) => /(^|\/)application([-.\w]*)\.(properties|ya?ml)$/i.test(file.relativePath));
 
-  if (!build.detected && configFiles.length === 0) {
+  if (!builds.some((build) => build.detected) && configFiles.length === 0) {
     return { detected: false, findings: [] };
   }
 
+  const detectedBuilds = builds.filter((build) => build.detected);
+
   return {
     detected: true,
-    buildTool: build.tool,
-    springBootVersion: build.springBootVersion,
-    javaVersion: build.javaVersion,
+    buildTool: summarizeValues(detectedBuilds.map((build) => build.tool)),
+    buildTools: uniqueValues(detectedBuilds.map((build) => build.tool)),
+    springBootVersion: summarizeValues(detectedBuilds.map((build) => build.springBootVersion)),
+    springBootVersions: uniqueValues(detectedBuilds.map((build) => build.springBootVersion)),
+    javaVersion: summarizeValues(detectedBuilds.map((build) => build.javaVersion)),
+    javaVersions: uniqueValues(detectedBuilds.map((build) => build.javaVersion)),
+    projectCount: detectedBuilds.length,
     profiles: Array.from(new Set(configFiles.map((file) => inferProfile(file.relativePath)))).sort(),
     configFileCount: configFiles.length,
     findings: [
-      ...scanBuild(context, build),
+      ...detectedBuilds.flatMap((build) => scanBuild(context, build)),
       ...scanConfigs(context, configFiles)
     ]
   };
 }
 
-function detectBuild(context) {
-  const pom = context.fileMap.get("pom.xml");
-  if (pom) {
-    return {
-      detected: /spring-boot/i.test(pom.content),
+function detectBuilds(context) {
+  const builds = [];
+
+  for (const pom of context.files.filter((file) => /(^|\/)pom\.xml$/i.test(file.relativePath))) {
+    const detected = /spring-boot/i.test(pom.content);
+    if (!detected) continue;
+
+    builds.push({
+      detected,
       tool: "Maven",
       file: pom,
       springBootVersion: firstMatch(pom.content, [
@@ -36,13 +46,15 @@ function detectBuild(context) {
         /<maven\.compiler\.release>([^<]+)<\/maven\.compiler\.release>/i,
         /<maven\.compiler\.target>([^<]+)<\/maven\.compiler\.target>/i
       ])
-    };
+    });
   }
 
-  const gradle = context.fileMap.get("build.gradle") ?? context.fileMap.get("build.gradle.kts");
-  if (gradle) {
-    return {
-      detected: /org\.springframework\.boot/i.test(gradle.content),
+  for (const gradle of context.files.filter((file) => /(^|\/)build\.gradle(\.kts)?$/i.test(file.relativePath))) {
+    const detected = /org\.springframework\.boot/i.test(gradle.content);
+    if (!detected) continue;
+
+    builds.push({
+      detected,
       tool: gradle.relativePath.endsWith(".kts") ? "Gradle Kotlin" : "Gradle",
       file: gradle,
       springBootVersion: firstMatch(gradle.content, [
@@ -53,10 +65,21 @@ function detectBuild(context) {
         /JavaVersion\.VERSION_(\d+)/i,
         /languageVersion\s*=\s*JavaLanguageVersion\.of\((\d+)\)/i
       ])
-    };
+    });
   }
 
-  return { detected: false, tool: null, file: null, springBootVersion: null, javaVersion: null };
+  return builds;
+}
+
+function summarizeValues(values) {
+  const unique = uniqueValues(values);
+  if (unique.length === 0) return null;
+  if (unique.length === 1) return unique[0];
+  return "multiple";
+}
+
+function uniqueValues(values) {
+  return Array.from(new Set(values.filter(Boolean))).sort();
 }
 
 function scanBuild(context, build) {
