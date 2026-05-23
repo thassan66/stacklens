@@ -148,6 +148,29 @@ test("CLI rejects conflicting output formats", async () => {
   );
 });
 
+test("CLI fail threshold applies to SARIF output", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "stacklens-"));
+  await writeFile(
+    path.join(root, "package.json"),
+    JSON.stringify({
+      scripts: {
+        postinstall: "node scripts/setup.js"
+      }
+    })
+  );
+
+  await assert.rejects(
+    execFileAsync(process.execPath, [path.resolve("src", "cli.js"), "--sarif", "--fail-on", "high", root]),
+    (error) => {
+      const sarif = JSON.parse(error.stdout);
+      assert.equal(sarif.version, "2.1.0");
+      assert.ok(sarif.runs[0].results.some((result) => result.ruleId === "node-lifecycle-script"));
+      assert.equal(error.code, 1);
+      return true;
+    }
+  );
+});
+
 test("CLI fail threshold exits non-zero when severity matches", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "stacklens-"));
   await writeFile(

@@ -17,6 +17,7 @@ async function main() {
 
   if (options.sarif) {
     process.stdout.write(`${JSON.stringify(toSarif(report), null, 2)}\n`);
+    applyFailThreshold(report, options.failOn);
     return;
   }
 
@@ -50,6 +51,7 @@ function parseArgs(args) {
   const options = {
     path: process.cwd(),
     json: false,
+    sarif: false,
     failOn: null,
     noOpen: false,
     port: 7070,
@@ -60,6 +62,7 @@ function parseArgs(args) {
     const arg = args[index];
     if (arg === "--help" || arg === "-h") options.help = true;
     else if (arg === "--json") options.json = true;
+    else if (arg === "--sarif") options.sarif = true;
     else if (arg === "--fail-on") {
       options.failOn = parseSeverity(args[index + 1]);
       index += 1;
@@ -128,10 +131,11 @@ function printHelp() {
   process.stdout.write(`stacklens
 
 Usage:
-  stacklens [path] [--json] [--fail-on <severity>] [--port <number>] [--no-open]
+  stacklens [path] [--json | --sarif] [--fail-on <severity>] [--port <number>] [--no-open]
 
 Options:
   --json          Print report JSON and do not start the dashboard
+  --sarif         Print SARIF 2.1.0 JSON and do not start the dashboard
   --fail-on <severity>
                   Exit with code 1 when findings meet severity: high, medium, or low
   --port <port>   Dashboard port, default 7070
