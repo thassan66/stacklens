@@ -32,7 +32,7 @@ npx stacklens --sarif /path/to/project
 
 ## Current rule packs
 
-- **Spring Boot**
+- **`@stacklens/spring`**
   - Maven/Gradle detection
   - Spring Boot and Java version hints
   - Actuator exposure risks
@@ -40,14 +40,23 @@ npx stacklens --sarif /path/to/project
   - profile-specific risk checks
   - DevTools dependency hints
 
-- **Node.js**
+- **`@stacklens/node`**
   - risky package lifecycle scripts
   - remote script execution
-  - package manager lockfile drift
-  - hardcoded env examples
-  - framework detection for React, Vue, Angular, Next.js, and Vite
+  - scripts that reference credentials or disable transport security
+  - missing, mixed, or outdated package manager lockfiles
+  - hardcoded env examples and committed `.env` secrets
+  - dependency bloat and floating dependency ranges
+  - older Node.js engine targets
+  - framework detection for React, Vue, Angular, Next.js, Vite, Express, and Fastify
 
-- **Common**
+- **`@stacklens/react`**
+  - public frontend env secrets
+  - production sourcemap hints
+  - missing error boundary signals
+  - unsafe CSP hints
+
+- **`@stacklens/common`**
   - Docker and Compose port/mount hints
   - GitHub Actions `write-all` and `pull_request_target` checks
 
@@ -112,19 +121,7 @@ Most tools are either linters, vulnerability scanners, or heavyweight platforms.
 ## Roadmap
 
 - Strategy: build one focused rule pack at a time. Starting every language at once would make the checks shallow.
-- Package-style rule packs:
-  - `@stacklens/node`
-    - risky npm scripts
-    - outdated package manager lockfiles
-    - exposed env vars
-    - dependency bloat
-    - insecure script patterns
-  - `@stacklens/react`
-    - exposed frontend env secrets
-    - large bundle hints
-    - missing error boundaries
-    - bad build config
-    - unsafe CSP hints
+- Additional package-style rule packs:
   - `@stacklens/vue`
     - Vite/Vue env config
     - public runtime config risks
@@ -151,8 +148,6 @@ Most tools are either linters, vulnerability scanners, or heavyweight platforms.
     - old edition
     - build script risks
     - binary size hints
-  - `@stacklens/spring`
-    - current Spring Boot rules
 - rule documentation pages
 - plugin API
 - desktop app packaging
