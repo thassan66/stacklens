@@ -2,7 +2,7 @@
 
 Local project insight dashboard for modern software stacks.
 
-`stacklens` scans a repository, detects the stack, and opens a local dashboard with practical findings about configuration, dependencies, runtime exposure, and developer workflow risks. It does not run the target application and does not send project data anywhere.
+`stacklens` scans a repository, detects the stack, then opens a local dashboard with practical insights about configuration, dependencies, runtime exposure, and developer workflow risks. It does not run the target application and does not send project data anywhere.
 
 ## Quick start
 
@@ -70,7 +70,48 @@ Most tools are either linters, vulnerability scanners, or heavyweight platforms.
 
 ## Roadmap
 
-- Python, Go, Rust, React, Vue, and Angular focused rule packs
+- Strategy: build one focused rule pack at a time. Starting every language at once would make the checks shallow.
+- Package-style rule packs:
+  - `@stacklens/node`
+    - risky npm scripts
+    - outdated package manager lockfiles
+    - exposed env vars
+    - dependency bloat
+    - insecure script patterns
+  - `@stacklens/react`
+    - exposed frontend env secrets
+    - large bundle hints
+    - missing error boundaries
+    - bad build config
+    - unsafe CSP hints
+  - `@stacklens/vue`
+    - Vite/Vue env config
+    - public runtime config risks
+    - build/deploy warnings
+  - `@stacklens/angular`
+    - environment file drift
+    - production build config issues
+    - old Angular/TypeScript versions
+  - `@stacklens/python`
+    - missing virtualenv hints
+    - risky requirements.txt
+    - exposed `.env`
+    - Django/Flask debug mode
+    - dependency pins missing
+  - `@stacklens/go`
+    - Go version
+    - module hygiene
+    - exposed config
+    - Docker build hints
+    - unsafe local scripts
+  - `@stacklens/rust`
+    - `Cargo.toml`
+    - unsafe dependency flags
+    - old edition
+    - build script risks
+    - binary size hints
+  - `@stacklens/spring`
+    - current Spring Boot rules
 - PR diff mode
 - SARIF output
 - rule documentation pages
