@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
 import { spawn } from "node:child_process";
+import { toSarif } from "./sarif.js";
 import { scanProject } from "./scanner.js";
 import { startDashboard } from "./server.js";
 
@@ -13,6 +14,11 @@ async function main() {
   }
 
   const report = await scanProject(options.path);
+
+  if (options.sarif) {
+    process.stdout.write(`${JSON.stringify(toSarif(report), null, 2)}\n`);
+    return;
+  }
 
   if (options.json) {
     process.stdout.write(`${JSON.stringify(report, null, 2)}\n`);
@@ -37,6 +43,7 @@ function parseArgs(args) {
   const options = {
     path: process.cwd(),
     json: false,
+    sarif: false,
     noOpen: false,
     port: 7070,
     help: false
@@ -46,6 +53,7 @@ function parseArgs(args) {
     const arg = args[index];
     if (arg === "--help" || arg === "-h") options.help = true;
     else if (arg === "--json") options.json = true;
+    else if (arg === "--sarif") options.sarif = true;
     else if (arg === "--no-open") options.noOpen = true;
     else if (arg === "--port") {
       options.port = parsePort(args[index + 1]);
@@ -57,6 +65,10 @@ function parseArgs(args) {
     } else {
       options.path = arg;
     }
+  }
+
+  if (options.json && options.sarif) {
+    throw new Error("Choose only one machine-readable output format: --json or --sarif");
   }
 
   return options;
@@ -81,10 +93,11 @@ function printHelp() {
   process.stdout.write(`stacklens
 
 Usage:
-  stacklens [path] [--json] [--port <number>] [--no-open]
+  stacklens [path] [--json | --sarif] [--port <number>] [--no-open]
 
 Options:
   --json          Print report JSON and do not start the dashboard
+  --sarif         Print SARIF 2.1.0 JSON and do not start the dashboard
   --port <port>   Dashboard port, default 7070
   --no-open       Do not open the browser automatically
   -h, --help      Show this help
