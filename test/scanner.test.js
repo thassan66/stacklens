@@ -1,11 +1,16 @@
 import assert from "node:assert/strict";
+import { execFile } from "node:child_process";
 import { mkdtemp, mkdir, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { test } from "node:test";
+import { promisify } from "node:util";
 import { rulePacks } from "../src/rule-packs.js";
+import { toSarif } from "../src/sarif.js";
 import { scanProject } from "../src/scanner.js";
 import { resolveAssetPath } from "../src/server.js";
+
+const execFileAsync = promisify(execFile);
 
 test("registers built-in rule packs", () => {
   assert.deepEqual(
@@ -88,6 +93,56 @@ test("detects Node and frontend risks", async () => {
   assert.ok(report.findings.some((finding) => finding.ruleId === "remote-script-execution"));
   assert.ok(report.findings.some((finding) => finding.ruleId === "env-example-secret"));
   assert.ok(report.findings.some((finding) => finding.ruleId === "multiple-node-lockfiles"));
+});
+
+test("converts findings to SARIF", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "stacklens-"));
+  await writeFile(
+    path.join(root, "package.json"),
+    JSON.stringify({
+      scripts: {
+        postinstall: "node scripts/setup.js"
+      }
+    })
+  );
+
+  const report = await scanProject(root);
+  const sarif = toSarif(report);
+  const result = sarif.runs[0].results.find((item) => item.ruleId === "node-lifecycle-script");
+
+  assert.equal(sarif.version, "2.1.0");
+  assert.equal(sarif.runs[0].tool.driver.name, "stacklens");
+  assert.ok(sarif.runs[0].tool.driver.rules.some((rule) => rule.id === "node-lifecycle-script"));
+  assert.equal(result.level, "error");
+  assert.equal(result.locations[0].physicalLocation.artifactLocation.uri, "package.json");
+});
+
+test("CLI emits SARIF output", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "stacklens-"));
+  await writeFile(
+    path.join(root, "package.json"),
+    JSON.stringify({
+      scripts: {
+        postinstall: "node scripts/setup.js"
+      }
+    })
+  );
+
+  const { stdout } = await execFileAsync(process.execPath, [path.resolve("src", "cli.js"), "--sarif", root]);
+  const sarif = JSON.parse(stdout);
+
+  assert.equal(sarif.version, "2.1.0");
+  assert.ok(sarif.runs[0].results.some((result) => result.ruleId === "node-lifecycle-script"));
+});
+
+test("CLI rejects conflicting output formats", async () => {
+  await assert.rejects(
+    execFileAsync(process.execPath, [path.resolve("src", "cli.js"), "--json", "--sarif", "."]),
+    (error) => {
+      assert.match(error.stderr, /--json or --sarif/);
+      return true;
+    }
+  );
 });
 
 test("detects expanded Node package hygiene risks", async () => {

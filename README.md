@@ -24,6 +24,12 @@ JSON output:
 npx stacklens --json /path/to/project
 ```
 
+SARIF output for code scanning tools:
+
+```bash
+npx stacklens --sarif /path/to/project
+```
+
 ## Current rule packs
 
 - **Spring Boot**
@@ -48,12 +54,13 @@ npx stacklens --json /path/to/project
 ## CLI
 
 ```txt
-stacklens [path] [--json] [--port 7070] [--no-open]
+stacklens [path] [--json | --sarif] [--port 7070] [--no-open]
 ```
 
 Options:
 
 - `--json`: print report JSON and do not start the dashboard
+- `--sarif`: print SARIF 2.1.0 JSON and do not start the dashboard
 - `--port <number>`: choose dashboard port, default `7070`
 - `--no-open`: start dashboard but do not open the browser
 - `--help`: show help
@@ -113,7 +120,6 @@ Most tools are either linters, vulnerability scanners, or heavyweight platforms.
   - `@stacklens/spring`
     - current Spring Boot rules
 - PR diff mode
-- SARIF output
 - rule documentation pages
 - plugin API
 - GitHub Action
