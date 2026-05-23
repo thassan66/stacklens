@@ -18,7 +18,8 @@ test("registers built-in rule packs", () => {
     [
       ["@stacklens/common", "common"],
       ["@stacklens/spring", "spring"],
-      ["@stacklens/node", "node"]
+      ["@stacklens/node", "node"],
+      ["@stacklens/react", "react"]
     ]
   );
 });
@@ -88,6 +89,8 @@ test("detects Node and frontend risks", async () => {
   assert.ok(report.project.stacks.includes("React"));
   assert.ok(report.project.stacks.includes("Vite"));
   assert.ok(report.rulePacks.some((pack) => pack.id === "@stacklens/node" && pack.detected));
+  assert.ok(report.rulePacks.some((pack) => pack.id === "@stacklens/react" && pack.detected));
+  assert.equal(report.ecosystems.react.projectCount, 1);
   assert.equal(report.ecosystems.node.packageManager, "Yarn");
   assert.ok(report.findings.some((finding) => finding.ruleId === "node-lifecycle-script"));
   assert.ok(report.findings.some((finding) => finding.ruleId === "remote-script-execution"));
