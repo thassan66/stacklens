@@ -16,6 +16,13 @@ async function main() {
 
   if (options.json) {
     process.stdout.write(`${JSON.stringify(report, null, 2)}\n`);
+    applyFailThreshold(report, options.failOn);
+    return;
+  }
+
+  if (shouldFail(report, options.failOn)) {
+    process.stderr.write(formatFailMessage(report, options.failOn));
+    process.exitCode = 1;
     return;
   }
 
@@ -37,6 +44,7 @@ function parseArgs(args) {
   const options = {
     path: process.cwd(),
     json: false,
+    failOn: null,
     noOpen: false,
     port: 7070,
     help: false
@@ -46,7 +54,12 @@ function parseArgs(args) {
     const arg = args[index];
     if (arg === "--help" || arg === "-h") options.help = true;
     else if (arg === "--json") options.json = true;
-    else if (arg === "--no-open") options.noOpen = true;
+    else if (arg === "--fail-on") {
+      options.failOn = parseSeverity(args[index + 1]);
+      index += 1;
+    } else if (arg.startsWith("--fail-on=")) {
+      options.failOn = parseSeverity(arg.slice("--fail-on=".length));
+    } else if (arg === "--no-open") options.noOpen = true;
     else if (arg === "--port") {
       options.port = parsePort(args[index + 1]);
       index += 1;
@@ -62,12 +75,36 @@ function parseArgs(args) {
   return options;
 }
 
+function parseSeverity(value) {
+  if (!["high", "medium", "low"].includes(value)) {
+    throw new Error("--fail-on must be one of: high, medium, low");
+  }
+  return value;
+}
+
 function parsePort(value) {
   const port = Number(value);
   if (!Number.isInteger(port) || port < 1 || port > 65535) {
     throw new Error("--port must be a valid port number");
   }
   return port;
+}
+
+function applyFailThreshold(report, severity) {
+  if (shouldFail(report, severity)) {
+    process.exitCode = 1;
+  }
+}
+
+function shouldFail(report, severity) {
+  if (!severity) return false;
+  if (severity === "high") return report.summary.high > 0;
+  if (severity === "medium") return report.summary.high > 0 || report.summary.medium > 0;
+  return report.summary.high > 0 || report.summary.medium > 0 || report.summary.low > 0;
+}
+
+function formatFailMessage(report, severity) {
+  return `stacklens: findings meet --fail-on ${severity} threshold (${report.summary.high} high, ${report.summary.medium} medium, ${report.summary.low} low)\n`;
 }
 
 function openBrowser(url) {
@@ -81,10 +118,12 @@ function printHelp() {
   process.stdout.write(`stacklens
 
 Usage:
-  stacklens [path] [--json] [--port <number>] [--no-open]
+  stacklens [path] [--json] [--fail-on <severity>] [--port <number>] [--no-open]
 
 Options:
   --json          Print report JSON and do not start the dashboard
+  --fail-on <severity>
+                  Exit with code 1 when findings meet severity: high, medium, or low
   --port <port>   Dashboard port, default 7070
   --no-open       Do not open the browser automatically
   -h, --help      Show this help

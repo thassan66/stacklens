@@ -1,11 +1,15 @@
 import assert from "node:assert/strict";
+import { execFile } from "node:child_process";
 import { mkdtemp, mkdir, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { test } from "node:test";
+import { promisify } from "node:util";
 import { rulePacks } from "../src/rule-packs.js";
 import { scanProject } from "../src/scanner.js";
 import { resolveAssetPath } from "../src/server.js";
+
+const execFileAsync = promisify(execFile);
 
 test("registers built-in rule packs", () => {
   assert.deepEqual(
@@ -131,6 +135,56 @@ test("detects React frontend configuration risks", async () => {
   assert.ok(report.findings.some((finding) => finding.ruleId === "react-production-sourcemaps-enabled"));
   assert.ok(report.findings.some((finding) => finding.ruleId === "react-unsafe-csp"));
   assert.ok(report.findings.some((finding) => finding.ruleId === "react-missing-error-boundary"));
+});
+
+test("CLI fail threshold exits non-zero when severity matches", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "stacklens-"));
+  await writeFile(
+    path.join(root, "package.json"),
+    JSON.stringify({
+      scripts: {
+        postinstall: "node scripts/setup.js"
+      }
+    })
+  );
+
+  await assert.rejects(
+    execFileAsync(process.execPath, [path.resolve("src", "cli.js"), "--json", "--fail-on", "high", root]),
+    (error) => {
+      const report = JSON.parse(error.stdout);
+      assert.equal(report.summary.high, 1);
+      assert.equal(error.code, 1);
+      return true;
+    }
+  );
+});
+
+test("CLI fail threshold exits zero when severity does not match", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "stacklens-"));
+  await writeFile(
+    path.join(root, "package.json"),
+    JSON.stringify({
+      dependencies: {
+        express: "5.0.0"
+      }
+    })
+  );
+
+  const { stdout } = await execFileAsync(process.execPath, [path.resolve("src", "cli.js"), "--json", "--fail-on", "high", root]);
+  const report = JSON.parse(stdout);
+
+  assert.equal(report.summary.high, 0);
+  assert.ok(report.summary.medium > 0);
+});
+
+test("CLI validates fail threshold severity", async () => {
+  await assert.rejects(
+    execFileAsync(process.execPath, [path.resolve("src", "cli.js"), "--json", "--fail-on", "critical", "."]),
+    (error) => {
+      assert.match(error.stderr, /--fail-on must be one of/);
+      return true;
+    }
+  );
 });
 
 test("detects expanded Node package hygiene risks", async () => {
