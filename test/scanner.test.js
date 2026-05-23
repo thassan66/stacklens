@@ -90,6 +90,60 @@ test("detects Node and frontend risks", async () => {
   assert.ok(report.findings.some((finding) => finding.ruleId === "multiple-node-lockfiles"));
 });
 
+test("detects expanded Node package hygiene risks", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "stacklens-"));
+  const dependencies = Object.fromEntries(
+    Array.from({ length: 61 }, (_, index) => [`package-${index}`, "1.0.0"])
+  );
+  dependencies.express = "^5.0.0";
+
+  await writeFile(
+    path.join(root, "package.json"),
+    JSON.stringify({
+      engines: {
+        node: ">=16"
+      },
+      scripts: {
+        fetch: "NODE_TLS_REJECT_UNAUTHORIZED=0 node scripts/fetch.js"
+      },
+      dependencies
+    })
+  );
+  await writeFile(path.join(root, ".env"), "API_KEY=real-production-key\n");
+
+  const report = await scanProject(root);
+
+  assert.ok(report.findings.some((finding) => finding.ruleId === "script-disables-transport-security"));
+  assert.ok(report.findings.some((finding) => finding.ruleId === "missing-node-lockfile"));
+  assert.ok(report.findings.some((finding) => finding.ruleId === "node-dependency-bloat"));
+  assert.ok(report.findings.some((finding) => finding.ruleId === "node-unpinned-dependencies"));
+  assert.ok(report.findings.some((finding) => finding.ruleId === "node-old-engine-target"));
+  assert.ok(report.findings.some((finding) => finding.ruleId === "committed-env-secret"));
+});
+
+test("detects outdated npm lockfile formats", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "stacklens-"));
+  await writeFile(
+    path.join(root, "package.json"),
+    JSON.stringify({
+      dependencies: {
+        express: "5.0.0"
+      }
+    })
+  );
+  await writeFile(
+    path.join(root, "package-lock.json"),
+    JSON.stringify({
+      name: "legacy-lockfile",
+      lockfileVersion: 1
+    })
+  );
+
+  const report = await scanProject(root);
+
+  assert.ok(report.findings.some((finding) => finding.ruleId === "old-npm-lockfile-version"));
+});
+
 test("detects common GitHub Actions risks", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "stacklens-"));
   const workflowDir = path.join(root, ".github", "workflows");

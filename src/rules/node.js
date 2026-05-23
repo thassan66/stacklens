@@ -1,4 +1,6 @@
 const lifecycleScripts = new Set(["preinstall", "install", "postinstall", "prepare", "prepublish"]);
+const dependencySections = ["dependencies", "devDependencies", "optionalDependencies", "peerDependencies"];
+const dependencyBloatThreshold = 60;
 
 export function scanNode(context) {
   const packageFiles = context.files.filter((file) => basename(file.relativePath) === "package.json");
@@ -48,7 +50,9 @@ export function scanNode(context) {
 
     findings.push(
       ...scanScripts(context, packageFile, parsed.scripts ?? {}),
-      ...scanLockfiles(context, packageFile)
+      ...scanLockfiles(context, packageFile, parsed),
+      ...scanDependencies(context, packageFile, parsed),
+      ...scanEngines(context, packageFile, parsed.engines ?? {})
     );
   }
 
@@ -110,23 +114,47 @@ function scanScripts(context, packageFile, scripts) {
         snippet: command
       }));
     }
+
+    if (/NODE_TLS_REJECT_UNAUTHORIZED\s*=\s*0|strict-ssl\s+false|--no-check-certificate|--insecure\b/i.test(command)) {
+      findings.push(context.finding({
+        severity: "high",
+        file: packageFile.relativePath,
+        line: findLine(packageFile.content, command),
+        category: "Node.js",
+        ruleId: "script-disables-transport-security",
+        title: "Script disables transport security checks",
+        message: "Install or build scripts should not bypass TLS certificate verification.",
+        snippet: command
+      }));
+    }
   }
 
   return findings;
 }
 
-function scanLockfiles(context, packageFile) {
+function scanLockfiles(context, packageFile, parsed) {
   const packageDirectory = dirname(packageFile.relativePath);
   const lockfiles = ["package-lock.json", "pnpm-lock.yaml", "yarn.lock", "bun.lockb"].filter((name) =>
     context.fileMap.has(joinRelative(packageDirectory, name))
   );
 
-  if (lockfiles.length <= 1) {
-    return [];
+  const findings = [];
+
+  if (hasDependencies(parsed) && lockfiles.length === 0) {
+    findings.push(context.finding({
+      severity: "medium",
+      file: packageFile.relativePath,
+      line: 1,
+      category: "Node.js",
+      ruleId: "missing-node-lockfile",
+      title: "Package has dependencies but no lockfile",
+      message: "Committed lockfiles keep local installs and CI on the same dependency tree.",
+      snippet: "No package manager lockfile found"
+    }));
   }
 
-  return [
-    context.finding({
+  if (lockfiles.length > 1) {
+    findings.push(context.finding({
       severity: "low",
       file: packageFile.relativePath,
       line: 1,
@@ -135,6 +163,114 @@ function scanLockfiles(context, packageFile) {
       title: "Multiple package manager lockfiles found",
       message: "Mixed lockfiles can cause different dependency trees locally and in CI.",
       snippet: lockfiles.join(", ")
+    }));
+  }
+
+  findings.push(...scanPackageLockVersion(context, packageDirectory));
+
+  return findings;
+}
+
+function scanPackageLockVersion(context, packageDirectory) {
+  const lockfilePath = joinRelative(packageDirectory, "package-lock.json");
+  const lockfile = context.fileMap.get(lockfilePath);
+  if (!lockfile) {
+    return [];
+  }
+
+  let parsed;
+  try {
+    parsed = JSON.parse(lockfile.content);
+  } catch {
+    return [
+      context.finding({
+        severity: "medium",
+        file: lockfile.relativePath,
+        line: 1,
+        category: "Node.js",
+        ruleId: "invalid-package-lock",
+        title: "package-lock.json could not be parsed",
+        message: "Invalid lockfiles can break reproducible installs in local and CI environments.",
+        snippet: "Invalid JSON"
+      })
+    ];
+  }
+
+  if (Number(parsed.lockfileVersion) >= 2) {
+    return [];
+  }
+
+  return [
+    context.finding({
+      severity: "low",
+      file: lockfile.relativePath,
+      line: findLine(lockfile.content, "\"lockfileVersion\""),
+      category: "Node.js",
+      ruleId: "old-npm-lockfile-version",
+      title: "Older npm lockfile format",
+      message: "Older npm lockfile formats can lose metadata used by modern npm installs.",
+      snippet: `lockfileVersion ${parsed.lockfileVersion ?? "missing"}`
+    })
+  ];
+}
+
+function scanDependencies(context, packageFile, parsed) {
+  const findings = [];
+  const dependencies = dependencySections.flatMap((section) =>
+    Object.entries(parsed[section] ?? {}).map(([name, version]) => ({ section, name, version }))
+  );
+  const runtimeDependencyCount = Object.keys(parsed.dependencies ?? {}).length;
+
+  if (runtimeDependencyCount >= dependencyBloatThreshold) {
+    findings.push(context.finding({
+      severity: "medium",
+      file: packageFile.relativePath,
+      line: findLine(packageFile.content, "\"dependencies\""),
+      category: "Node.js",
+      ruleId: "node-dependency-bloat",
+      title: "Large runtime dependency surface",
+      message: "A large dependency set increases install time, review burden, and supply-chain exposure.",
+      snippet: `${runtimeDependencyCount} runtime dependencies`
+    }));
+  }
+
+  const unpinned = dependencies.filter((dependency) => isUnpinnedVersion(dependency.version));
+  if (unpinned.length > 0) {
+    findings.push(context.finding({
+      severity: "low",
+      file: packageFile.relativePath,
+      line: findLine(packageFile.content, `"${unpinned[0].name}"`),
+      category: "Node.js",
+      ruleId: "node-unpinned-dependencies",
+      title: "Dependencies use floating version ranges",
+      message: "Floating dependency ranges can produce different installs over time, especially without strict lockfile discipline.",
+      snippet: unpinned.slice(0, 5).map((dependency) => `${dependency.name}@${dependency.version}`).join(", ")
+    }));
+  }
+
+  return findings;
+}
+
+function scanEngines(context, packageFile, engines) {
+  if (typeof engines.node !== "string") {
+    return [];
+  }
+
+  const minimumMajor = parseMinimumNodeMajor(engines.node);
+  if (!minimumMajor || minimumMajor >= 20) {
+    return [];
+  }
+
+  return [
+    context.finding({
+      severity: "medium",
+      file: packageFile.relativePath,
+      line: findLine(packageFile.content, "\"node\""),
+      category: "Node.js",
+      ruleId: "node-old-engine-target",
+      title: "Older Node.js engine target",
+      message: "Older Node.js targets can limit dependency upgrades and security support windows.",
+      snippet: `node ${engines.node}`
     })
   ];
 }
@@ -146,14 +282,19 @@ function scanEnvExamples(context) {
   for (const file of envFiles) {
     for (const line of file.lines) {
       if (/(SECRET|TOKEN|PASSWORD|API_KEY|PRIVATE_KEY)=([^$\s#][^\s#]+)/i.test(line.text)) {
+        const isTemplate = /\.env\.(example|sample)$/i.test(file.relativePath);
         findings.push(context.finding({
-          severity: "medium",
+          severity: isTemplate ? "medium" : "high",
           file: file.relativePath,
           line: line.number,
           category: "Node.js",
-          ruleId: "env-example-secret",
-          title: "Environment file contains a concrete secret-like value",
-          message: "Use placeholders in committed env templates and keep real values out of source control.",
+          ruleId: isTemplate ? "env-example-secret" : "committed-env-secret",
+          title: isTemplate
+            ? "Environment file contains a concrete secret-like value"
+            : "Committed .env file contains a concrete secret-like value",
+          message: isTemplate
+            ? "Use placeholders in committed env templates and keep real values out of source control."
+            : "Real .env files should not be committed with concrete secrets.",
           snippet: redactEnvLine(line.text.trim())
         }));
       }
@@ -187,6 +328,28 @@ function summarizePackageManagers(packageManagers) {
   if (packageManagers.size === 0) return "unknown";
   if (packageManagers.size === 1) return Array.from(packageManagers)[0];
   return "multiple";
+}
+
+function hasDependencies(parsed) {
+  return dependencySections.some((section) => Object.keys(parsed[section] ?? {}).length > 0);
+}
+
+function isUnpinnedVersion(version) {
+  if (typeof version !== "string") return false;
+  const value = version.trim();
+  if (!value || /^(file:|link:|workspace:|\$)/i.test(value)) return false;
+  return (
+    value === "*" ||
+    /\bx\b/i.test(value) ||
+    /\blatest\b/i.test(value) ||
+    /^[~^><=]/.test(value) ||
+    /\s+-\s+|\s+\|\|\s+/.test(value)
+  );
+}
+
+function parseMinimumNodeMajor(range) {
+  const match = String(range).match(/(\d+)(?:\.\d+)?(?:\.\d+)?/);
+  return match ? Number(match[1]) : null;
 }
 
 function basename(relativePath) {
