@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>stacklens</title>
+    <link rel="stylesheet" href="/styles.css">
+  </head>
+  <body>
+    <header class="topbar">
+      <div>
+        <h1>stacklens</h1>
+        <p id="project-path"></p>
+      </div>
+      <div class="score" id="risk-score">Loading</div>
+    </header>
+
+    <main>
+      <section class="summary-grid" id="summary-grid"></section>
+
+      <section class="panel">
+        <div class="panel-header">
+          <h2>Detected Stack</h2>
+        </div>
+        <div class="facts" id="stack-facts"></div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-header">
+          <h2>Findings</h2>
+          <div class="filters" id="filters"></div>
+        </div>
+        <div id="findings"></div>
+      </section>
+    </main>
+
+    <script src="/app.js"></script>
+  </body>
+</html>

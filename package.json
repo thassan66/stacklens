@@ -1,0 +1,43 @@
+{
+  "name": "stacklens",
+  "version": "0.1.0",
+  "description": "Local project insight dashboard for modern software stacks.",
+  "type": "module",
+  "bin": {
+    "stacklens": "./src/cli.js"
+  },
+  "scripts": {
+    "test": "node --test",
+    "demo:spring": "node src/cli.js --no-open examples/spring-risky",
+    "demo:node": "node src/cli.js --no-open examples/node-risky",
+    "scan:json": "node src/cli.js --json examples/spring-risky"
+  },
+  "keywords": [
+    "developer-tools",
+    "dashboard",
+    "security",
+    "configuration",
+    "spring-boot",
+    "nodejs",
+    "devops"
+  ],
+  "author": "",
+  "license": "MIT",
+  "engines": {
+    "node": ">=20"
+  },
+  "files": [
+    "src",
+    "public",
+    "README.md",
+    "LICENSE"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/your-org/stacklens.git"
+  },
+  "bugs": {
+    "url": "https://github.com/your-org/stacklens/issues"
+  },
+  "homepage": "https://github.com/your-org/stacklens#readme"
+}

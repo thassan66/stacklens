@@ -1,0 +1,9 @@
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,env,heapdump
+
+server:
+  error:
+    include-stacktrace: always
