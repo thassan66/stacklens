@@ -4,6 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import { test } from "node:test";
 import { scanProject } from "../src/scanner.js";
+import { resolveAssetPath } from "../src/server.js";
 
 test("detects Spring Boot risks", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "stacklens-"));
@@ -88,4 +89,58 @@ test("detects common GitHub Actions risks", async () => {
 
   assert.ok(report.findings.some((finding) => finding.ruleId === "workflow-write-all"));
   assert.ok(report.findings.some((finding) => finding.ruleId === "workflow-pull-request-target"));
+});
+
+test("detects nested Node and Spring projects", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "stacklens-"));
+  const nodeDir = path.join(root, "apps", "web");
+  const springDir = path.join(root, "services", "api");
+  await mkdir(path.join(springDir, "src", "main", "resources"), { recursive: true });
+  await mkdir(nodeDir, { recursive: true });
+
+  await writeFile(
+    path.join(nodeDir, "package.json"),
+    JSON.stringify({
+      scripts: {
+        postinstall: "node scripts/setup.js"
+      },
+      dependencies: {
+        react: "^19.0.0"
+      }
+    })
+  );
+  await writeFile(path.join(nodeDir, "yarn.lock"), "# demo");
+
+  await writeFile(
+    path.join(springDir, "pom.xml"),
+    `<project>
+      <parent>
+        <artifactId>spring-boot-starter-parent</artifactId>
+        <version>3.3.1</version>
+      </parent>
+      <properties><java.version>11</java.version></properties>
+    </project>`
+  );
+  await writeFile(
+    path.join(springDir, "src", "main", "resources", "application.yml"),
+    "server.error.include-stacktrace=always\n"
+  );
+
+  const report = await scanProject(root);
+
+  assert.ok(report.project.stacks.includes("Node.js"));
+  assert.ok(report.project.stacks.includes("React"));
+  assert.ok(report.project.stacks.includes("Spring Boot"));
+  assert.equal(report.ecosystems.node.packageManager, "Yarn");
+  assert.equal(report.ecosystems.spring.springBootVersion, "3.3.1");
+  assert.ok(report.findings.some((finding) => finding.file === "apps/web/package.json" && finding.ruleId === "node-lifecycle-script"));
+  assert.ok(report.findings.some((finding) => finding.file === "services/api/pom.xml" && finding.ruleId === "spring-older-java-target"));
+});
+
+test("dashboard asset resolver handles query strings and blocks traversal", () => {
+  assert.equal(path.basename(resolveAssetPath("/")), "index.html");
+  assert.equal(path.basename(resolveAssetPath("/app.js?v=1")), "app.js");
+  assert.equal(resolveAssetPath("/../src/server.js"), null);
+  assert.equal(resolveAssetPath("/%2e%2e/src/server.js"), null);
+  assert.equal(resolveAssetPath("/%"), null);
 });

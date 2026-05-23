@@ -13,7 +13,7 @@ function scanDocker(context) {
 
   for (const file of dockerFiles) {
     for (const line of file.lines) {
-      if (/^\s*ports:\s*$|["']?\d+:\d+["']?/.test(line.text)) {
+      if (/["']?\d+:\d+["']?/.test(line.text)) {
         findings.push(context.finding({
           severity: "low",
           file: file.relativePath,

@@ -1,22 +1,24 @@
 const lifecycleScripts = new Set(["preinstall", "install", "postinstall", "prepare", "prepublish"]);
 
 export function scanNode(context) {
-  const packageFile = context.fileMap.get("package.json");
-  if (!packageFile) {
+  const packageFiles = context.files.filter((file) => basename(file.relativePath) === "package.json");
+  if (packageFiles.length === 0) {
     return { detected: false, frameworks: [], findings: [] };
   }
 
-  let parsed;
-  try {
-    parsed = JSON.parse(packageFile.content);
-  } catch {
-    return {
-      detected: true,
-      frameworks: [],
-      findings: [
+  const frameworks = new Set();
+  const packageManagers = new Set();
+  const findings = [];
+
+  for (const packageFile of packageFiles) {
+    let parsed;
+    try {
+      parsed = JSON.parse(packageFile.content);
+    } catch {
+      findings.push(
         context.finding({
           severity: "medium",
-          file: "package.json",
+          file: packageFile.relativePath,
           line: 1,
           category: "Node.js",
           ruleId: "invalid-package-json",
@@ -24,27 +26,40 @@ export function scanNode(context) {
           message: "Invalid package metadata can break installs, scripts, and CI detection.",
           snippet: "Invalid JSON"
         })
-      ]
+      );
+      continue;
+    }
+
+    const dependencies = {
+      ...parsed.dependencies,
+      ...parsed.devDependencies,
+      ...parsed.optionalDependencies,
+      ...parsed.peerDependencies
     };
+
+    for (const framework of detectFrameworks(dependencies)) {
+      frameworks.add(framework);
+    }
+
+    const packageManager = detectPackageManager(context, dirname(packageFile.relativePath));
+    if (packageManager !== "unknown") {
+      packageManagers.add(packageManager);
+    }
+
+    findings.push(
+      ...scanScripts(context, packageFile, parsed.scripts ?? {}),
+      ...scanLockfiles(context, packageFile)
+    );
   }
 
-  const dependencies = {
-    ...parsed.dependencies,
-    ...parsed.devDependencies,
-    ...parsed.optionalDependencies,
-    ...parsed.peerDependencies
-  };
-  const frameworks = detectFrameworks(dependencies);
-  const findings = [
-    ...scanScripts(context, packageFile, parsed.scripts ?? {}),
-    ...scanLockfiles(context),
-    ...scanEnvExamples(context)
-  ];
+  findings.push(...scanEnvExamples(context));
 
   return {
     detected: true,
-    frameworks,
-    packageManager: detectPackageManager(context),
+    frameworks: Array.from(frameworks).sort(),
+    packageManager: summarizePackageManagers(packageManagers),
+    packageManagers: Array.from(packageManagers).sort(),
+    packageCount: packageFiles.length,
     findings
   };
 }
@@ -60,7 +75,7 @@ function scanScripts(context, packageFile, scripts) {
     if (lifecycleScripts.has(name)) {
       findings.push(context.finding({
         severity: "high",
-        file: "package.json",
+        file: packageFile.relativePath,
         line: findLine(packageFile.content, `"${name}"`),
         category: "Node.js",
         ruleId: "node-lifecycle-script",
@@ -73,7 +88,7 @@ function scanScripts(context, packageFile, scripts) {
     if (/\b(curl|wget)\b[^|;&\n]*\|\s*(bash|sh|zsh|node|python)\b/i.test(command)) {
       findings.push(context.finding({
         severity: "high",
-        file: "package.json",
+        file: packageFile.relativePath,
         line: findLine(packageFile.content, command),
         category: "Node.js",
         ruleId: "remote-script-execution",
@@ -86,7 +101,7 @@ function scanScripts(context, packageFile, scripts) {
     if (/(~\/\.ssh|\.npmrc|NPM_TOKEN|GITHUB_TOKEN|AWS_SECRET_ACCESS_KEY)/i.test(command)) {
       findings.push(context.finding({
         severity: "high",
-        file: "package.json",
+        file: packageFile.relativePath,
         line: findLine(packageFile.content, command),
         category: "Node.js",
         ruleId: "script-references-credentials",
@@ -100,9 +115,10 @@ function scanScripts(context, packageFile, scripts) {
   return findings;
 }
 
-function scanLockfiles(context) {
+function scanLockfiles(context, packageFile) {
+  const packageDirectory = dirname(packageFile.relativePath);
   const lockfiles = ["package-lock.json", "pnpm-lock.yaml", "yarn.lock", "bun.lockb"].filter((name) =>
-    context.fileMap.has(name)
+    context.fileMap.has(joinRelative(packageDirectory, name))
   );
 
   if (lockfiles.length <= 1) {
@@ -112,7 +128,7 @@ function scanLockfiles(context) {
   return [
     context.finding({
       severity: "low",
-      file: "package.json",
+      file: packageFile.relativePath,
       line: 1,
       category: "Node.js",
       ruleId: "multiple-node-lockfiles",
@@ -159,12 +175,31 @@ function detectFrameworks(dependencies) {
   return frameworks;
 }
 
-function detectPackageManager(context) {
-  if (context.fileMap.has("pnpm-lock.yaml")) return "pnpm";
-  if (context.fileMap.has("yarn.lock")) return "Yarn";
-  if (context.fileMap.has("bun.lockb")) return "Bun";
-  if (context.fileMap.has("package-lock.json")) return "npm";
+function detectPackageManager(context, packageDirectory) {
+  if (context.fileMap.has(joinRelative(packageDirectory, "pnpm-lock.yaml"))) return "pnpm";
+  if (context.fileMap.has(joinRelative(packageDirectory, "yarn.lock"))) return "Yarn";
+  if (context.fileMap.has(joinRelative(packageDirectory, "bun.lockb"))) return "Bun";
+  if (context.fileMap.has(joinRelative(packageDirectory, "package-lock.json"))) return "npm";
   return "unknown";
+}
+
+function summarizePackageManagers(packageManagers) {
+  if (packageManagers.size === 0) return "unknown";
+  if (packageManagers.size === 1) return Array.from(packageManagers)[0];
+  return "multiple";
+}
+
+function basename(relativePath) {
+  return relativePath.split(/[\\/]/).at(-1);
+}
+
+function dirname(relativePath) {
+  const index = relativePath.lastIndexOf("/");
+  return index === -1 ? "" : relativePath.slice(0, index);
+}
+
+function joinRelative(directory, name) {
+  return directory ? `${directory}/${name}` : name;
 }
 
 function findLine(content, needle) {
