@@ -1,8 +1,6 @@
 import { readdir, readFile, stat } from "node:fs/promises";
 import path from "node:path";
-import { scanCommon } from "./rules/common.js";
-import { scanNode } from "./rules/node.js";
-import { scanSpring } from "./rules/spring.js";
+import { detectStacks, getPackResult, listRulePackSummaries, runRulePacks } from "./rule-packs.js";
 
 const ignoredDirectories = new Set([
   ".git",
@@ -31,15 +29,11 @@ export async function scanProject(projectPath) {
 
   const files = await collectReadableFiles(root);
   const context = createContext(root, files);
-  const spring = scanSpring(context);
-  const node = scanNode(context);
-  const commonFindings = scanCommon(context);
-  const findings = sortFindings([
-    ...commonFindings,
-    ...spring.findings,
-    ...node.findings
-  ]);
-  const stacks = detectStacks({ spring, node });
+  const packResults = runRulePacks(context);
+  const spring = getPackResult(packResults, "spring");
+  const node = getPackResult(packResults, "node");
+  const findings = sortFindings(packResults.flatMap(({ result }) => result.findings ?? []));
+  const stacks = detectStacks(packResults);
 
   return {
     project: {
@@ -48,6 +42,7 @@ export async function scanProject(projectPath) {
       stacks,
       fileCount: files.length
     },
+    rulePacks: listRulePackSummaries(packResults),
     ecosystems: {
       spring: omitFindings(spring),
       node: omitFindings(node)
@@ -148,14 +143,6 @@ function isInterestingPath(relativePath) {
     /(^|\/)application([-.\w]*)\.(properties|ya?ml)$/i.test(relativePath) ||
     /^\.github\/workflows\/.+\.ya?ml$/i.test(relativePath)
   );
-}
-
-function detectStacks({ spring, node }) {
-  const stacks = [];
-  if (spring.detected) stacks.push("Spring Boot");
-  if (node.detected) stacks.push("Node.js");
-  if (node.frameworks?.length) stacks.push(...node.frameworks);
-  return Array.from(new Set(stacks));
 }
 
 function omitFindings(result) {

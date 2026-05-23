@@ -3,8 +3,20 @@ import { mkdtemp, mkdir, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { test } from "node:test";
+import { rulePacks } from "../src/rule-packs.js";
 import { scanProject } from "../src/scanner.js";
 import { resolveAssetPath } from "../src/server.js";
+
+test("registers built-in rule packs", () => {
+  assert.deepEqual(
+    rulePacks.map((pack) => [pack.id, pack.ecosystem]),
+    [
+      ["@stacklens/common", "common"],
+      ["@stacklens/spring", "spring"],
+      ["@stacklens/node", "node"]
+    ]
+  );
+});
 
 test("detects Spring Boot risks", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "stacklens-"));
@@ -38,6 +50,7 @@ spring:
   const report = await scanProject(root);
 
   assert.ok(report.project.stacks.includes("Spring Boot"));
+  assert.ok(report.rulePacks.some((pack) => pack.id === "@stacklens/spring" && pack.detected));
   assert.equal(report.ecosystems.spring.springBootVersion, "3.3.1");
   assert.equal(report.ecosystems.spring.javaVersion, "11");
   assert.ok(report.findings.some((finding) => finding.ruleId === "spring-actuator-exposes-all"));
@@ -69,6 +82,7 @@ test("detects Node and frontend risks", async () => {
   assert.ok(report.project.stacks.includes("Node.js"));
   assert.ok(report.project.stacks.includes("React"));
   assert.ok(report.project.stacks.includes("Vite"));
+  assert.ok(report.rulePacks.some((pack) => pack.id === "@stacklens/node" && pack.detected));
   assert.equal(report.ecosystems.node.packageManager, "Yarn");
   assert.ok(report.findings.some((finding) => finding.ruleId === "node-lifecycle-script"));
   assert.ok(report.findings.some((finding) => finding.ruleId === "remote-script-execution"));
