@@ -13,7 +13,8 @@ test("registers built-in rule packs", () => {
     [
       ["@stacklens/common", "common"],
       ["@stacklens/spring", "spring"],
-      ["@stacklens/node", "node"]
+      ["@stacklens/node", "node"],
+      ["@stacklens/react", "react"]
     ]
   );
 });
@@ -83,11 +84,53 @@ test("detects Node and frontend risks", async () => {
   assert.ok(report.project.stacks.includes("React"));
   assert.ok(report.project.stacks.includes("Vite"));
   assert.ok(report.rulePacks.some((pack) => pack.id === "@stacklens/node" && pack.detected));
+  assert.ok(report.rulePacks.some((pack) => pack.id === "@stacklens/react" && pack.detected));
+  assert.equal(report.ecosystems.react.projectCount, 1);
   assert.equal(report.ecosystems.node.packageManager, "Yarn");
   assert.ok(report.findings.some((finding) => finding.ruleId === "node-lifecycle-script"));
   assert.ok(report.findings.some((finding) => finding.ruleId === "remote-script-execution"));
   assert.ok(report.findings.some((finding) => finding.ruleId === "env-example-secret"));
   assert.ok(report.findings.some((finding) => finding.ruleId === "multiple-node-lockfiles"));
+});
+
+test("detects React frontend configuration risks", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "stacklens-"));
+  await mkdir(path.join(root, "src"), { recursive: true });
+
+  await writeFile(
+    path.join(root, "package.json"),
+    JSON.stringify({
+      scripts: {
+        build: "GENERATE_SOURCEMAP=true vite build"
+      },
+      dependencies: {
+        "@vitejs/plugin-react": "^5.0.0",
+        react: "^19.0.0",
+        "react-dom": "^19.0.0"
+      },
+      devDependencies: {
+        vite: "^7.0.0"
+      }
+    })
+  );
+  await writeFile(path.join(root, ".env"), "VITE_API_KEY=real-browser-key\n");
+  await writeFile(
+    path.join(root, "index.html"),
+    "<meta http-equiv=\"Content-Security-Policy\" content=\"script-src 'self' 'unsafe-inline'\">\n"
+  );
+  await writeFile(
+    path.join(root, "src", "App.jsx"),
+    "export function App() { return <main>Hello</main>; }\n"
+  );
+
+  const report = await scanProject(root);
+
+  assert.ok(report.project.stacks.includes("React"));
+  assert.ok(report.rulePacks.some((pack) => pack.id === "@stacklens/react" && pack.detected));
+  assert.ok(report.findings.some((finding) => finding.ruleId === "react-public-env-secret"));
+  assert.ok(report.findings.some((finding) => finding.ruleId === "react-production-sourcemaps-enabled"));
+  assert.ok(report.findings.some((finding) => finding.ruleId === "react-unsafe-csp"));
+  assert.ok(report.findings.some((finding) => finding.ruleId === "react-missing-error-boundary"));
 });
 
 test("detects expanded Node package hygiene risks", async () => {

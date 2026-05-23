@@ -1,5 +1,6 @@
 import { scanCommon } from "./rules/common.js";
 import { scanNode } from "./rules/node.js";
+import { scanReact } from "./rules/react.js";
 import { scanSpring } from "./rules/spring.js";
 
 export const rulePacks = [
@@ -26,6 +27,13 @@ export const rulePacks = [
       if (!result.detected) return [];
       return ["Node.js", ...(result.frameworks ?? [])];
     }
+  },
+  {
+    id: "@stacklens/react",
+    name: "React",
+    ecosystem: "react",
+    scan: scanReact,
+    stacks: (result) => (result.detected ? ["React"] : [])
   }
 ];
 

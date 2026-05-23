@@ -32,6 +32,7 @@ export async function scanProject(projectPath) {
   const packResults = runRulePacks(context);
   const spring = getPackResult(packResults, "spring");
   const node = getPackResult(packResults, "node");
+  const react = getPackResult(packResults, "react");
   const findings = sortFindings(packResults.flatMap(({ result }) => result.findings ?? []));
   const stacks = detectStacks(packResults);
 
@@ -45,7 +46,8 @@ export async function scanProject(projectPath) {
     rulePacks: listRulePackSummaries(packResults),
     ecosystems: {
       spring: omitFindings(spring),
-      node: omitFindings(node)
+      node: omitFindings(node),
+      react: omitFindings(react)
     },
     findings,
     summary: summarize(findings)
@@ -136,10 +138,18 @@ function isInterestingPath(relativePath) {
       "docker-compose.yaml",
       "compose.yml",
       "compose.yaml",
+      "index.html",
       ".env",
       ".env.example",
-      ".env.sample"
+      ".env.sample",
+      "vite.config.js",
+      "vite.config.mjs",
+      "vite.config.cjs",
+      "vite.config.ts",
+      "vite.config.mts",
+      "vite.config.cts"
     ].includes(basename) ||
+    /(^|\/)src\/.+\.[cm]?[jt]sx?$/i.test(relativePath) ||
     /(^|\/)application([-.\w]*)\.(properties|ya?ml)$/i.test(relativePath) ||
     /^\.github\/workflows\/.+\.ya?ml$/i.test(relativePath)
   );
