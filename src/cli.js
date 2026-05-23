@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
 import { spawn } from "node:child_process";
+import { toSarif } from "./sarif.js";
 import { scanProject } from "./scanner.js";
 import { startDashboard } from "./server.js";
 
@@ -13,6 +14,11 @@ async function main() {
   }
 
   const report = await scanProject(options.path);
+
+  if (options.sarif) {
+    process.stdout.write(`${JSON.stringify(toSarif(report), null, 2)}\n`);
+    return;
+  }
 
   if (options.json) {
     process.stdout.write(`${JSON.stringify(report, null, 2)}\n`);
@@ -70,6 +76,10 @@ function parseArgs(args) {
     } else {
       options.path = arg;
     }
+  }
+
+  if (options.json && options.sarif) {
+    throw new Error("Choose only one machine-readable output format: --json or --sarif");
   }
 
   return options;

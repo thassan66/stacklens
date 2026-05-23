@@ -10,7 +10,8 @@
     "test": "node --test",
     "demo:spring": "node src/cli.js --no-open examples/spring-risky",
     "demo:node": "node src/cli.js --no-open examples/node-risky",
-    "scan:json": "node src/cli.js --json examples/spring-risky"
+    "scan:json": "node src/cli.js --json examples/spring-risky",
+    "scan:sarif": "node src/cli.js --sarif examples/spring-risky"
   },
   "keywords": [
     "developer-tools",

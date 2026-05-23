@@ -24,6 +24,12 @@ JSON output:
 npx stacklens --json /path/to/project
 ```
 
+SARIF output for code scanning tools:
+
+```bash
+npx stacklens --sarif /path/to/project
+```
+
 ## Current rule packs
 
 - **Spring Boot**
@@ -114,7 +120,6 @@ Most tools are either linters, vulnerability scanners, or heavyweight platforms.
   - `@stacklens/spring`
     - current Spring Boot rules
 - PR diff mode
-- SARIF output
 - rule documentation pages
 - plugin API
 - GitHub Action
