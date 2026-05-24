@@ -54,13 +54,14 @@ npx stacklens --sarif /path/to/project
 ## CLI
 
 ```txt
-stacklens [path] [--json | --sarif] [--port 7070] [--no-open]
+stacklens [path] [--json | --sarif] [--fail-on high|medium|low] [--port 7070] [--no-open]
 ```
 
 Options:
 
 - `--json`: print report JSON and do not start the dashboard
 - `--sarif`: print SARIF 2.1.0 JSON and do not start the dashboard
+- `--fail-on <severity>`: exit with code `1` when findings meet `high`, `medium`, or `low`
 - `--port <number>`: choose dashboard port, default `7070`
 - `--no-open`: start dashboard but do not open the browser
 - `--help`: show help

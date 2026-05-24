@@ -148,6 +148,79 @@ test("CLI rejects conflicting output formats", async () => {
   );
 });
 
+test("CLI fail threshold applies to SARIF output", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "stacklens-"));
+  await writeFile(
+    path.join(root, "package.json"),
+    JSON.stringify({
+      scripts: {
+        postinstall: "node scripts/setup.js"
+      }
+    })
+  );
+
+  await assert.rejects(
+    execFileAsync(process.execPath, [path.resolve("src", "cli.js"), "--sarif", "--fail-on", "high", root]),
+    (error) => {
+      const sarif = JSON.parse(error.stdout);
+      assert.equal(sarif.version, "2.1.0");
+      assert.ok(sarif.runs[0].results.some((result) => result.ruleId === "node-lifecycle-script"));
+      assert.equal(error.code, 1);
+      return true;
+    }
+  );
+});
+
+test("CLI fail threshold exits non-zero when severity matches", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "stacklens-"));
+  await writeFile(
+    path.join(root, "package.json"),
+    JSON.stringify({
+      scripts: {
+        postinstall: "node scripts/setup.js"
+      }
+    })
+  );
+
+  await assert.rejects(
+    execFileAsync(process.execPath, [path.resolve("src", "cli.js"), "--json", "--fail-on", "high", root]),
+    (error) => {
+      const report = JSON.parse(error.stdout);
+      assert.equal(report.summary.high, 1);
+      assert.equal(error.code, 1);
+      return true;
+    }
+  );
+});
+
+test("CLI fail threshold exits zero when severity does not match", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "stacklens-"));
+  await writeFile(
+    path.join(root, "package.json"),
+    JSON.stringify({
+      dependencies: {
+        express: "5.0.0"
+      }
+    })
+  );
+
+  const { stdout } = await execFileAsync(process.execPath, [path.resolve("src", "cli.js"), "--json", "--fail-on", "high", root]);
+  const report = JSON.parse(stdout);
+
+  assert.equal(report.summary.high, 0);
+  assert.ok(report.summary.medium > 0);
+});
+
+test("CLI validates fail threshold severity", async () => {
+  await assert.rejects(
+    execFileAsync(process.execPath, [path.resolve("src", "cli.js"), "--json", "--fail-on", "critical", "."]),
+    (error) => {
+      assert.match(error.stderr, /--fail-on must be one of/);
+      return true;
+    }
+  );
+});
+
 test("detects expanded Node package hygiene risks", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "stacklens-"));
   const dependencies = Object.fromEntries(
