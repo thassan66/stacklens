@@ -20,7 +20,8 @@ test("registers built-in rule packs", () => {
       ["@stacklens/common", "common"],
       ["@stacklens/spring", "spring"],
       ["@stacklens/node", "node"],
-      ["@stacklens/react", "react"]
+      ["@stacklens/react", "react"],
+      ["@stacklens/vue", "vue"]
     ]
   );
 });
@@ -97,6 +98,68 @@ test("detects Node and frontend risks", async () => {
   assert.ok(report.findings.some((finding) => finding.ruleId === "remote-script-execution"));
   assert.ok(report.findings.some((finding) => finding.ruleId === "env-example-secret"));
   assert.ok(report.findings.some((finding) => finding.ruleId === "multiple-node-lockfiles"));
+});
+
+test("detects Vue frontend configuration risks", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "stacklens-"));
+  await mkdir(path.join(root, "src"), { recursive: true });
+
+  await writeFile(
+    path.join(root, "package.json"),
+    JSON.stringify({
+      scripts: {
+        build: "vite build --mode=development"
+      },
+      dependencies: {
+        vue: "^3.5.0"
+      },
+      devDependencies: {
+        "@vitejs/plugin-vue": "^6.0.0",
+        vite: "^7.0.0"
+      }
+    })
+  );
+  await writeFile(path.join(root, ".env.local"), "VITE_API_TOKEN=real-browser-token\n");
+  await writeFile(
+    path.join(root, "nuxt.config.ts"),
+    `export default defineNuxtConfig({
+  runtimeConfig: {
+    secretToken: "server-only-token",
+    public: {
+      apiToken: "real-runtime-token"
+    }
+  }
+})
+`
+  );
+  await writeFile(path.join(root, "vite.config.ts"), "export default { build: { sourcemap: true } }\n");
+  await writeFile(
+    path.join(root, "src", "App.vue"),
+    "<template><main>Hello</main></template>\n<script setup>import { ref } from 'vue'</script>\n"
+  );
+
+  const report = await scanProject(root);
+
+  assert.ok(report.project.stacks.includes("Vue"));
+  assert.ok(report.rulePacks.some((pack) => pack.id === "@stacklens/vue" && pack.detected));
+  assert.equal(report.ecosystems.vue.projectCount, 1);
+  assert.ok(report.findings.some((finding) => finding.ruleId === "vue-public-env-secret"));
+  assert.ok(report.findings.some((finding) => finding.ruleId === "vue-public-runtime-secret"));
+  assert.ok(report.findings.some((finding) => finding.ruleId === "vue-build-uses-development-mode"));
+  assert.ok(report.findings.some((finding) => finding.ruleId === "vue-production-sourcemaps-enabled"));
+  assert.ok(!report.findings.some((finding) => finding.snippet.includes("server-only-token")));
+});
+
+test("does not detect Vue from matcher text alone", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "stacklens-"));
+  await mkdir(path.join(root, "src"), { recursive: true });
+  await writeFile(path.join(root, "package.json"), JSON.stringify({ scripts: { test: "node src/rules.js" } }));
+  await writeFile(path.join(root, "src", "rules.js"), "const matcher = /<template\\\\b/;\n");
+
+  const report = await scanProject(root);
+
+  assert.ok(!report.project.stacks.includes("Vue"));
+  assert.ok(report.rulePacks.some((pack) => pack.id === "@stacklens/vue" && !pack.detected));
 });
 
 test("converts findings to SARIF", async () => {

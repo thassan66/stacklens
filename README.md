@@ -56,6 +56,12 @@ npx stacklens --sarif /path/to/project
   - missing error boundary signals
   - unsafe CSP hints
 
+- **`@stacklens/vue`**
+  - Vite and Nuxt public env secrets
+  - public runtime config secrets
+  - production sourcemap hints
+  - development-mode build warnings
+
 - **`@stacklens/common`**
   - Docker and Compose port/mount hints
   - GitHub Actions `write-all` and `pull_request_target` checks
@@ -122,10 +128,6 @@ Most tools are either linters, vulnerability scanners, or heavyweight platforms.
 
 - Strategy: build one focused rule pack at a time. Starting every language at once would make the checks shallow.
 - Additional package-style rule packs:
-  - `@stacklens/vue`
-    - Vite/Vue env config
-    - public runtime config risks
-    - build/deploy warnings
   - `@stacklens/angular`
     - environment file drift
     - production build config issues
