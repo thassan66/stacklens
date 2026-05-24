@@ -22,6 +22,9 @@
     "security",
     "configuration",
     "spring-boot",
+    "quarkus",
+    "camel",
+    "openshift",
     "nodejs",
     "devops"
   ],

@@ -70,6 +70,14 @@ npm publish
   - profile-specific risk checks
   - DevTools dependency hints
 
+- **`@stacklens/quarkus`**
+  - Maven/Gradle and Quarkus extension detection
+  - production profile config warnings
+  - Camel endpoint credential and tracing hints
+  - Artemis credential and broker URL hints
+  - OpenShift Route, image, container security, and env secret checks
+  - Argo CD mutable revision and automated prune hints
+
 - **`@stacklens/node`**
   - risky package lifecycle scripts
   - remote script execution
@@ -158,11 +166,6 @@ Most tools are either linters, vulnerability scanners, or heavyweight platforms.
 
 - Strategy: build one focused rule pack at a time. Starting every language at once would make the checks shallow.
 - Additional package-style rule packs:
-  - `@stacklens/quarkus`
-    - Quarkus Maven/Gradle and extension detection
-    - `application.properties` and profile-specific production warnings
-    - Camel and Artemis configuration risk hints
-    - OpenShift route/deployment and Argo CD manifest checks
   - `@stacklens/angular`
     - environment file drift
     - production build config issues

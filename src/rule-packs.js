@@ -1,5 +1,6 @@
 import { scanCommon } from "./rules/common.js";
 import { scanNode } from "./rules/node.js";
+import { scanQuarkus } from "./rules/quarkus.js";
 import { scanReact } from "./rules/react.js";
 import { scanSpring } from "./rules/spring.js";
 import { scanVue } from "./rules/vue.js";
@@ -18,6 +19,22 @@ export const rulePacks = [
     ecosystem: "spring",
     scan: scanSpring,
     stacks: (result) => (result.detected ? ["Spring Boot"] : [])
+  },
+  {
+    id: "@stacklens/quarkus",
+    name: "Quarkus",
+    ecosystem: "quarkus",
+    scan: scanQuarkus,
+    stacks: (result) => {
+      if (!result.detected) return [];
+      return [
+        "Quarkus",
+        ...(result.usesCamel ? ["Apache Camel"] : []),
+        ...(result.usesArtemis ? ["Apache ActiveMQ Artemis"] : []),
+        ...(result.hasOpenShift ? ["OpenShift"] : []),
+        ...(result.hasArgoCd ? ["Argo CD"] : [])
+      ];
+    }
   },
   {
     id: "@stacklens/node",

@@ -31,6 +31,7 @@ export async function scanProject(projectPath) {
   const context = createContext(root, files);
   const packResults = runRulePacks(context);
   const spring = getPackResult(packResults, "spring");
+  const quarkus = getPackResult(packResults, "quarkus");
   const node = getPackResult(packResults, "node");
   const react = getPackResult(packResults, "react");
   const vue = getPackResult(packResults, "vue");
@@ -47,6 +48,7 @@ export async function scanProject(projectPath) {
     rulePacks: listRulePackSummaries(packResults),
     ecosystems: {
       spring: omitFindings(spring),
+      quarkus: omitFindings(quarkus),
       node: omitFindings(node),
       react: omitFindings(react),
       vue: omitFindings(vue)
@@ -135,6 +137,7 @@ function isInterestingPath(relativePath) {
       "pom.xml",
       "build.gradle",
       "build.gradle.kts",
+      "gradle.properties",
       "Dockerfile",
       "docker-compose.yml",
       "docker-compose.yaml",
@@ -156,9 +159,24 @@ function isInterestingPath(relativePath) {
       "nuxt.config.ts",
       "nuxt.config.mts",
       "nuxt.config.cts",
-      "vue.config.js"
+      "vue.config.js",
+      "deployment.yaml",
+      "deployment.yml",
+      "deploymentconfig.yaml",
+      "deploymentconfig.yml",
+      "route.yaml",
+      "route.yml",
+      "service.yaml",
+      "service.yml",
+      "secret.yaml",
+      "secret.yml",
+      "kustomization.yaml",
+      "kustomization.yml",
+      "values.yaml",
+      "values.yml"
     ].includes(basename) ||
     /^\.env(\.[\w.-]+)?$/i.test(basename) ||
+    /(^|\/)(src\/main\/kubernetes|k8s|kubernetes|openshift|deploy|deployments|manifests|argocd|\.argocd|helm|charts)\/.+\.(ya?ml|json)$/i.test(relativePath) ||
     /(^|\/)src\/.+\.vue$/i.test(relativePath) ||
     /(^|\/)src\/.+\.[cm]?[jt]sx?$/i.test(relativePath) ||
     /(^|\/)application([-.\w]*)\.(properties|ya?ml)$/i.test(relativePath) ||

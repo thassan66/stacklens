@@ -1,12 +1,15 @@
 export function scanSpring(context) {
   const builds = detectBuilds(context);
   const configFiles = context.files.filter((file) => /(^|\/)application([-.\w]*)\.(properties|ya?ml)$/i.test(file.relativePath));
+  const detectedBuilds = builds.filter((build) => build.detected);
+  const springConfigFiles = configFiles.filter((file) => {
+    if (hasSpringConfigSignal(file)) return true;
+    return detectedBuilds.length > 0 && !hasQuarkusConfigSignal(file);
+  });
 
-  if (!builds.some((build) => build.detected) && configFiles.length === 0) {
+  if (detectedBuilds.length === 0 && springConfigFiles.length === 0) {
     return { detected: false, findings: [] };
   }
-
-  const detectedBuilds = builds.filter((build) => build.detected);
 
   return {
     detected: true,
@@ -17,11 +20,11 @@ export function scanSpring(context) {
     javaVersion: summarizeValues(detectedBuilds.map((build) => build.javaVersion)),
     javaVersions: uniqueValues(detectedBuilds.map((build) => build.javaVersion)),
     projectCount: detectedBuilds.length,
-    profiles: Array.from(new Set(configFiles.map((file) => inferProfile(file.relativePath)))).sort(),
-    configFileCount: configFiles.length,
+    profiles: Array.from(new Set(springConfigFiles.map((file) => inferProfile(file.relativePath)))).sort(),
+    configFileCount: springConfigFiles.length,
     findings: [
       ...detectedBuilds.flatMap((build) => scanBuild(context, build)),
-      ...scanConfigs(context, configFiles)
+      ...scanConfigs(context, springConfigFiles)
     ]
   };
 }
@@ -233,7 +236,7 @@ function parseYamlLike(file) {
 
   for (const line of file.lines) {
     const text = line.text.replace(/\s+#.*$/, "");
-    const match = text.match(/^(\s*)([A-Za-z0-9_.-]+)\s*:\s*(.*)$/);
+    const match = text.match(/^(\s*)["']?([%A-Za-z0-9_.-]+)["']?\s*:\s*(.*)$/);
     if (!match) continue;
     const indent = match[1].length;
     const key = match[2];
@@ -245,6 +248,20 @@ function parseYamlLike(file) {
   }
 
   return entries;
+}
+
+function hasSpringConfigSignal(file) {
+  const entries = file.relativePath.endsWith(".properties")
+    ? parseProperties(file)
+    : parseYamlLike(file);
+  return entries.some((entry) => /^(spring|management|server|logging)\./i.test(entry.key));
+}
+
+function hasQuarkusConfigSignal(file) {
+  const entries = file.relativePath.endsWith(".properties")
+    ? parseProperties(file)
+    : parseYamlLike(file);
+  return entries.some((entry) => /^(%[^.]+\.)?(quarkus|camel)\./i.test(entry.key));
 }
 
 function inferProfile(relativePath) {
