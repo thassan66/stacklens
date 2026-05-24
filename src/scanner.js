@@ -33,6 +33,7 @@ export async function scanProject(projectPath) {
   const spring = getPackResult(packResults, "spring");
   const node = getPackResult(packResults, "node");
   const react = getPackResult(packResults, "react");
+  const vue = getPackResult(packResults, "vue");
   const findings = sortFindings(packResults.flatMap(({ result }) => result.findings ?? []));
   const stacks = detectStacks(packResults);
 
@@ -47,7 +48,8 @@ export async function scanProject(projectPath) {
     ecosystems: {
       spring: omitFindings(spring),
       node: omitFindings(node),
-      react: omitFindings(react)
+      react: omitFindings(react),
+      vue: omitFindings(vue)
     },
     findings,
     summary: summarize(findings)
@@ -147,8 +149,17 @@ function isInterestingPath(relativePath) {
       "vite.config.cjs",
       "vite.config.ts",
       "vite.config.mts",
-      "vite.config.cts"
+      "vite.config.cts",
+      "nuxt.config.js",
+      "nuxt.config.mjs",
+      "nuxt.config.cjs",
+      "nuxt.config.ts",
+      "nuxt.config.mts",
+      "nuxt.config.cts",
+      "vue.config.js"
     ].includes(basename) ||
+    /^\.env(\.[\w.-]+)?$/i.test(basename) ||
+    /(^|\/)src\/.+\.vue$/i.test(relativePath) ||
     /(^|\/)src\/.+\.[cm]?[jt]sx?$/i.test(relativePath) ||
     /(^|\/)application([-.\w]*)\.(properties|ya?ml)$/i.test(relativePath) ||
     /^\.github\/workflows\/.+\.ya?ml$/i.test(relativePath)

@@ -2,6 +2,7 @@ import { scanCommon } from "./rules/common.js";
 import { scanNode } from "./rules/node.js";
 import { scanReact } from "./rules/react.js";
 import { scanSpring } from "./rules/spring.js";
+import { scanVue } from "./rules/vue.js";
 
 export const rulePacks = [
   {
@@ -34,6 +35,13 @@ export const rulePacks = [
     ecosystem: "react",
     scan: scanReact,
     stacks: (result) => (result.detected ? ["React"] : [])
+  },
+  {
+    id: "@stacklens/vue",
+    name: "Vue",
+    ecosystem: "vue",
+    scan: scanVue,
+    stacks: (result) => (result.detected ? ["Vue"] : [])
   }
 ];
 
