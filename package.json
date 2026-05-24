@@ -22,6 +22,13 @@
     "security",
     "configuration",
     "spring-boot",
+    "quarkus",
+    "camel",
+    "kubernetes",
+    "openshift",
+    "argocd",
+    "helm",
+    "kustomize",
     "nodejs",
     "devops"
   ],

@@ -19,6 +19,7 @@ test("registers built-in rule packs", () => {
     [
       ["@stacklens/common", "common"],
       ["@stacklens/spring", "spring"],
+      ["@stacklens/quarkus", "quarkus"],
       ["@stacklens/node", "node"],
       ["@stacklens/react", "react"],
       ["@stacklens/vue", "vue"]
@@ -64,6 +65,183 @@ spring:
   assert.ok(report.findings.some((finding) => finding.ruleId === "spring-actuator-exposes-all"));
   assert.ok(report.findings.some((finding) => finding.ruleId === "spring-hardcoded-secret"));
   assert.ok(report.findings.some((finding) => finding.ruleId === "spring-devtools-not-development-only"));
+});
+
+test("detects Quarkus Camel Artemis and deployment risks", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "stacklens-"));
+  await mkdir(path.join(root, "src", "main", "resources"), { recursive: true });
+  await mkdir(path.join(root, "src", "main", "kubernetes"), { recursive: true });
+  await mkdir(path.join(root, "argocd"), { recursive: true });
+
+  await writeFile(
+    path.join(root, "pom.xml"),
+    `<project>
+      <properties>
+        <quarkus.platform.version>3.17.1</quarkus.platform.version>
+        <maven.compiler.release>11</maven.compiler.release>
+      </properties>
+      <dependencyManagement>
+        <dependencies>
+          <dependency>
+            <groupId>io.quarkus.platform</groupId>
+            <artifactId>quarkus-bom</artifactId>
+            <version>\${quarkus.platform.version}</version>
+          </dependency>
+        </dependencies>
+      </dependencyManagement>
+      <dependencies>
+        <dependency><groupId>io.quarkus</groupId><artifactId>quarkus-resteasy-reactive</artifactId></dependency>
+        <dependency><groupId>org.apache.camel.quarkus</groupId><artifactId>camel-quarkus-jms</artifactId></dependency>
+        <dependency><groupId>io.quarkus</groupId><artifactId>quarkus-artemis-jms</artifactId></dependency>
+      </dependencies>
+    </project>`
+  );
+  await writeFile(
+    path.join(root, "src", "main", "resources", "application-prod.properties"),
+    `%prod.quarkus.http.insecure-requests=enabled
+%prod.quarkus.datasource.password=RealDbPassword123
+%prod.quarkus.rest-client.inventory.url=https://user:pass@example.com
+%prod.quarkus.messaging.broker-url=tcp://events:61616
+%prod.quarkus.artemis.url=tcp://broker:61616
+%prod.quarkus.artemis.password=RealBrokerPassword123
+%prod.quarkus.artemis.devservices.enabled=true
+%prod.quarkus.log.level=DEBUG
+%prod.camel.main.tracing=true
+camel.component.jms.broker-url=tcp://user:pass@broker:61616
+`
+  );
+  await writeFile(
+    path.join(root, "src", "main", "kubernetes", "route.yaml"),
+    `apiVersion: route.openshift.io/v1
+kind: Route
+metadata:
+  name: quarkus-app
+spec:
+  to:
+    kind: Service
+    name: quarkus-app
+`
+  );
+  await writeFile(
+    path.join(root, "src", "main", "kubernetes", "deployment.yaml"),
+    `apiVersion: apps/v1
+kind: Deployment
+spec:
+  template:
+    spec:
+      containers:
+        - name: app
+          image: image-registry.openshift-image-registry.svc:5000/team/quarkus-app:latest
+          securityContext:
+            privileged: true
+          env:
+            - name: ARTEMIS_PASSWORD
+              value: real-password
+`
+  );
+  await writeFile(
+    path.join(root, "argocd", "application.yaml"),
+    `apiVersion: argoproj.io/v1alpha1
+kind: Application
+spec:
+  source:
+    targetRevision: HEAD
+  syncPolicy:
+    automated:
+      prune: true
+`
+  );
+
+  const report = await scanProject(root);
+
+  assert.ok(report.project.stacks.includes("Quarkus"));
+  assert.ok(report.project.stacks.includes("Apache Camel"));
+  assert.ok(report.project.stacks.includes("Apache ActiveMQ Artemis"));
+  assert.ok(report.project.stacks.includes("OpenShift"));
+  assert.ok(report.project.stacks.includes("Argo CD"));
+  assert.ok(!report.project.stacks.includes("Spring Boot"));
+  assert.ok(report.rulePacks.some((pack) => pack.id === "@stacklens/quarkus" && pack.detected));
+  assert.equal(report.ecosystems.quarkus.quarkusVersion, "3.17.1");
+  assert.equal(report.ecosystems.quarkus.javaVersion, "11");
+  assert.equal(report.ecosystems.quarkus.usesCamel, true);
+  assert.equal(report.ecosystems.quarkus.usesArtemis, true);
+  assert.ok(report.findings.some((finding) => finding.ruleId === "quarkus-older-java-target"));
+  assert.ok(report.findings.some((finding) => finding.ruleId === "quarkus-hardcoded-secret"));
+  assert.ok(report.findings.some((finding) => finding.ruleId === "artemis-hardcoded-credential"));
+  assert.ok(report.findings.some((finding) => finding.ruleId === "quarkus-dev-services-prod"));
+  assert.ok(report.findings.some((finding) => finding.ruleId === "quarkus-insecure-http-prod"));
+  assert.ok(report.findings.some((finding) => finding.ruleId === "quarkus-debug-logging-prod"));
+  assert.ok(report.findings.some((finding) => finding.ruleId === "camel-tracing-prod"));
+  assert.ok(report.findings.some((finding) => finding.ruleId === "camel-endpoint-credentials"));
+  assert.ok(report.findings.some((finding) => finding.ruleId === "quarkus-endpoint-credentials"));
+  assert.ok(report.findings.some((finding) => finding.ruleId === "quarkus-plain-tcp-endpoint"));
+  assert.ok(report.findings.some((finding) => finding.ruleId === "artemis-plain-tcp-url"));
+  assert.ok(report.findings.some((finding) => finding.ruleId === "openshift-route-without-tls"));
+  assert.ok(report.findings.some((finding) => finding.ruleId === "kubernetes-mutable-image-tag"));
+  assert.ok(report.findings.some((finding) => finding.ruleId === "kubernetes-privileged-container"));
+  assert.ok(report.findings.some((finding) => finding.ruleId === "kubernetes-env-secret"));
+  assert.ok(report.findings.some((finding) => finding.ruleId === "argocd-mutable-target-revision"));
+  assert.ok(report.findings.some((finding) => finding.ruleId === "argocd-auto-prune-enabled"));
+});
+
+test("detects generic deployment Helm and Kustomize risks", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "stacklens-"));
+  await mkdir(path.join(root, "k8s"), { recursive: true });
+  await mkdir(path.join(root, "helm"), { recursive: true });
+
+  await writeFile(
+    path.join(root, "k8s", "deployment.yaml"),
+    `apiVersion: apps/v1
+kind: Deployment
+spec:
+  template:
+    spec:
+      containers:
+        - name: api
+          image: registry.example.com/team/api:latest
+          env:
+            - name: API_TOKEN
+              value: real-token
+`
+  );
+  await writeFile(
+    path.join(root, "helm", "Chart.yaml"),
+    "apiVersion: v2\nname: api\nversion: 0.1.0\n"
+  );
+  await writeFile(
+    path.join(root, "helm", "values-prod.yaml"),
+    `image:
+  repository: registry.example.com/team/api
+  tag: latest
+  pullPolicy: Always
+database:
+  password: RealDbPassword123
+`
+  );
+  await writeFile(
+    path.join(root, "kustomization.yaml"),
+    `resources:
+  - https://github.com/example/platform//base?ref=main
+images:
+  - name: registry.example.com/team/api
+    newTag: latest
+`
+  );
+
+  const report = await scanProject(root);
+
+  assert.ok(report.project.stacks.includes("Helm"));
+  assert.ok(report.project.stacks.includes("Kustomize"));
+  assert.ok(!report.project.stacks.includes("Quarkus"));
+  assert.equal(report.ecosystems.common.hasHelm, true);
+  assert.equal(report.ecosystems.common.hasKustomize, true);
+  assert.ok(report.findings.some((finding) => finding.ruleId === "kubernetes-mutable-image-tag"));
+  assert.ok(report.findings.some((finding) => finding.ruleId === "kubernetes-env-secret"));
+  assert.ok(report.findings.some((finding) => finding.ruleId === "helm-mutable-image-tag"));
+  assert.ok(report.findings.some((finding) => finding.ruleId === "helm-image-pull-always"));
+  assert.ok(report.findings.some((finding) => finding.ruleId === "helm-values-secret"));
+  assert.ok(report.findings.some((finding) => finding.ruleId === "kustomize-mutable-image-tag"));
+  assert.ok(report.findings.some((finding) => finding.ruleId === "kustomize-remote-resource"));
 });
 
 test("detects Node and frontend risks", async () => {
