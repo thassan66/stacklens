@@ -18,6 +18,14 @@ inputs:
     description: Optional severity threshold that fails the action. Use high, medium, or low.
     required: false
     default: ""
+  changed:
+    description: Only report findings in files changed against the Git base.
+    required: false
+    default: "false"
+  base:
+    description: Git base ref for changed-file mode.
+    required: false
+    default: ""
 
 outputs:
   report-path:
@@ -34,4 +42,6 @@ runs:
         INPUT_OUTPUT_FORMAT: ${{ inputs.output-format }}
         INPUT_OUTPUT_FILE: ${{ inputs.output-file }}
         INPUT_FAIL_ON: ${{ inputs.fail-on }}
+        INPUT_CHANGED: ${{ inputs.changed }}
+        INPUT_BASE: ${{ inputs.base }}
       run: node "$GITHUB_ACTION_PATH/src/action.js"

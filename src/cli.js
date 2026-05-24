@@ -1,9 +1,12 @@
 #!/usr/bin/env node
 
-import { spawn } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
+import { promisify } from "node:util";
 import { toSarif } from "./sarif.js";
 import { scanProject } from "./scanner.js";
 import { startDashboard } from "./server.js";
+
+const execFileAsync = promisify(execFile);
 
 async function main() {
   const options = parseArgs(process.argv.slice(2));
@@ -13,7 +16,11 @@ async function main() {
     return;
   }
 
-  const report = await scanProject(options.path);
+  let report = await scanProject(options.path);
+  if (options.changed) {
+    const diff = await getChangedFiles(report.project.root, options.base);
+    report = filterReportToChangedFiles(report, diff);
+  }
 
   if (options.sarif) {
     process.stdout.write(`${JSON.stringify(toSarif(report), null, 2)}\n`);
@@ -53,6 +60,8 @@ function parseArgs(args) {
     json: false,
     sarif: false,
     failOn: null,
+    changed: false,
+    base: null,
     noOpen: false,
     port: 7070,
     help: false
@@ -63,7 +72,15 @@ function parseArgs(args) {
     if (arg === "--help" || arg === "-h") options.help = true;
     else if (arg === "--json") options.json = true;
     else if (arg === "--sarif") options.sarif = true;
-    else if (arg === "--fail-on") {
+    else if (arg === "--changed") options.changed = true;
+    else if (arg === "--base") {
+      options.base = requireValue(args[index + 1], "--base");
+      options.changed = true;
+      index += 1;
+    } else if (arg.startsWith("--base=")) {
+      options.base = requireValue(arg.slice("--base=".length), "--base");
+      options.changed = true;
+    } else if (arg === "--fail-on") {
       options.failOn = parseSeverity(args[index + 1]);
       index += 1;
     } else if (arg.startsWith("--fail-on=")) {
@@ -86,6 +103,13 @@ function parseArgs(args) {
   }
 
   return options;
+}
+
+function requireValue(value, option) {
+  if (!value || value.startsWith("-")) {
+    throw new Error(`${option} requires a value`);
+  }
+  return value;
 }
 
 function parseSeverity(value) {
@@ -120,6 +144,61 @@ function formatFailMessage(report, severity) {
   return `stacklens: findings meet --fail-on ${severity} threshold (${report.summary.high} high, ${report.summary.medium} medium, ${report.summary.low} low)\n`;
 }
 
+async function getChangedFiles(root, requestedBase) {
+  const bases = requestedBase ? [requestedBase] : ["origin/main", "origin/master", "main", "master"];
+  const errors = [];
+
+  for (const base of bases) {
+    try {
+      const { stdout } = await execFileAsync(
+        "git",
+        ["-C", root, "diff", "--name-only", "--diff-filter=ACMRTUXB", `${base}...HEAD`],
+        { maxBuffer: 10 * 1024 * 1024 }
+      );
+      return {
+        base,
+        files: stdout.split(/\r?\n/).map((file) => file.trim()).filter(Boolean)
+      };
+    } catch (error) {
+      errors.push(`${base}: ${error.message}`);
+    }
+  }
+
+  throw new Error(`Could not determine changed files. Pass --base <ref>. Tried: ${errors.join("; ")}`);
+}
+
+function filterReportToChangedFiles(report, diff) {
+  const changedFiles = new Set(diff.files.map(normalizePath));
+  const findings = report.findings.filter((finding) => changedFiles.has(normalizePath(finding.file)));
+
+  return {
+    ...report,
+    findings,
+    summary: summarizeFindings(findings),
+    diff: {
+      mode: "changed",
+      base: diff.base,
+      changedFileCount: diff.files.length,
+      changedFiles: diff.files
+    }
+  };
+}
+
+function summarizeFindings(findings) {
+  return findings.reduce(
+    (summary, item) => {
+      summary[item.severity] += 1;
+      summary.byCategory[item.category] = (summary.byCategory[item.category] ?? 0) + 1;
+      return summary;
+    },
+    { high: 0, medium: 0, low: 0, byCategory: {} }
+  );
+}
+
+function normalizePath(value) {
+  return String(value).replaceAll("\\", "/");
+}
+
 function openBrowser(url) {
   const command = process.platform === "darwin" ? "open" : process.platform === "win32" ? "cmd" : "xdg-open";
   const args = process.platform === "win32" ? ["/c", "start", "", url] : [url];
@@ -131,11 +210,13 @@ function printHelp() {
   process.stdout.write(`stacklens
 
 Usage:
-  stacklens [path] [--json | --sarif] [--fail-on <severity>] [--port <number>] [--no-open]
+  stacklens [path] [--json | --sarif] [--changed] [--base <ref>] [--fail-on <severity>] [--port <number>] [--no-open]
 
 Options:
   --json          Print report JSON and do not start the dashboard
   --sarif         Print SARIF 2.1.0 JSON and do not start the dashboard
+  --changed       Only report findings in files changed against a Git base
+  --base <ref>    Git base ref for --changed, default tries origin/main then origin/master
   --fail-on <severity>
                   Exit with code 1 when findings meet severity: high, medium, or low
   --port <port>   Dashboard port, default 7070

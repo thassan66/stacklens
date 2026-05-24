@@ -54,13 +54,15 @@ npx stacklens --sarif /path/to/project
 ## CLI
 
 ```txt
-stacklens [path] [--json | --sarif] [--fail-on high|medium|low] [--port 7070] [--no-open]
+stacklens [path] [--json | --sarif] [--changed] [--base <ref>] [--fail-on high|medium|low] [--port 7070] [--no-open]
 ```
 
 Options:
 
 - `--json`: print report JSON and do not start the dashboard
 - `--sarif`: print SARIF 2.1.0 JSON and do not start the dashboard
+- `--changed`: only report findings in files changed against a Git base
+- `--base <ref>`: Git base ref for `--changed`, default tries `origin/main` then `origin/master`
 - `--fail-on <severity>`: exit with code `1` when findings meet `high`, `medium`, or `low`
 - `--port <number>`: choose dashboard port, default `7070`
 - `--no-open`: start dashboard but do not open the browser
@@ -88,6 +90,8 @@ jobs:
           path: .
           output-format: sarif
           output-file: stacklens.sarif
+          changed: true
+          base: ${{ github.event.pull_request.base.sha || 'origin/main' }}
           fail-on: high
       - uses: github/codeql-action/upload-sarif@v3
         if: always()
@@ -149,7 +153,6 @@ Most tools are either linters, vulnerability scanners, or heavyweight platforms.
     - binary size hints
   - `@stacklens/spring`
     - current Spring Boot rules
-- PR diff mode
 - rule documentation pages
 - plugin API
 - desktop app packaging

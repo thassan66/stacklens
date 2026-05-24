@@ -256,6 +256,54 @@ test("GitHub Action runner validates output format", async () => {
   );
 });
 
+test("CLI changed mode only reports findings in changed files", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "stacklens-"));
+  await mkdir(path.join(root, ".github", "workflows"), { recursive: true });
+  await writeFile(
+    path.join(root, ".github", "workflows", "ci.yml"),
+    "name: ci\non: pull_request\npermissions: write-all\n"
+  );
+  await writeFile(
+    path.join(root, "package.json"),
+    JSON.stringify({
+      scripts: {
+        test: "node test.js"
+      }
+    })
+  );
+
+  await execFileAsync("git", ["init"], { cwd: root });
+  await execFileAsync("git", ["add", "."], { cwd: root });
+  await execFileAsync("git", ["-c", "user.email=test@example.com", "-c", "user.name=Test", "commit", "-m", "initial"], { cwd: root });
+
+  await writeFile(
+    path.join(root, "package.json"),
+    JSON.stringify({
+      scripts: {
+        postinstall: "node scripts/setup.js"
+      }
+    })
+  );
+  await execFileAsync("git", ["add", "package.json"], { cwd: root });
+  await execFileAsync("git", ["-c", "user.email=test@example.com", "-c", "user.name=Test", "commit", "-m", "risky package"], { cwd: root });
+
+  const { stdout } = await execFileAsync(process.execPath, [
+    path.resolve("src", "cli.js"),
+    "--json",
+    "--changed",
+    "--base",
+    "HEAD~1",
+    root
+  ]);
+  const report = JSON.parse(stdout);
+
+  assert.equal(report.diff.mode, "changed");
+  assert.equal(report.diff.base, "HEAD~1");
+  assert.deepEqual(report.diff.changedFiles, ["package.json"]);
+  assert.ok(report.findings.some((finding) => finding.ruleId === "node-lifecycle-script"));
+  assert.ok(!report.findings.some((finding) => finding.ruleId === "workflow-write-all"));
+});
+
 test("CLI fail threshold exits non-zero when severity matches", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "stacklens-"));
   await writeFile(

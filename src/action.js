@@ -13,6 +13,8 @@ const scanPath = input("path") || ".";
 const outputFormat = input("output-format") || "sarif";
 const outputFile = input("output-file") || defaultOutputFile(outputFormat);
 const failOn = input("fail-on");
+const changed = parseBoolean(input("changed"));
+const base = input("base");
 
 if (!["json", "sarif"].includes(outputFormat)) {
   fail(`output-format must be one of: json, sarif`);
@@ -24,6 +26,12 @@ if (failOn && !["high", "medium", "low"].includes(failOn)) {
 
 const reportPath = resolveWorkspacePath(outputFile);
 const args = [path.join(repoRoot, "src", "cli.js"), outputFormat === "sarif" ? "--sarif" : "--json"];
+if (changed) {
+  args.push("--changed");
+}
+if (base) {
+  args.push("--base", base);
+}
 if (failOn) {
   args.push("--fail-on", failOn);
 }
@@ -53,6 +61,13 @@ function input(name) {
 
 function defaultOutputFile(format) {
   return format === "sarif" ? "stacklens.sarif" : "stacklens.json";
+}
+
+function parseBoolean(value) {
+  if (!value) return false;
+  if (["true", "1", "yes"].includes(value.toLowerCase())) return true;
+  if (["false", "0", "no"].includes(value.toLowerCase())) return false;
+  fail(`changed must be true or false`);
 }
 
 function resolveWorkspacePath(value) {
