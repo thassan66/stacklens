@@ -7,13 +7,17 @@ Local project insight dashboard for modern software stacks.
 ## Quick start
 
 ```bash
-npx stacklens .
+npx stacklens-cli .
 ```
+
+Requires Node.js 20 or newer.
+The npm package name is `stacklens-cli`; the installed command is `stacklens`.
 
 From this repo:
 
 ```bash
 npm test
+npm run verify:package
 npm run demo:spring
 npm run demo:node
 ```
@@ -21,13 +25,39 @@ npm run demo:node
 JSON output:
 
 ```bash
-npx stacklens --json /path/to/project
+npx stacklens-cli --json /path/to/project
 ```
 
 SARIF output for code scanning tools:
 
 ```bash
-npx stacklens --sarif /path/to/project
+npx stacklens-cli --sarif /path/to/project
+```
+
+## Local install
+
+Build and install the package tarball on your machine:
+
+```bash
+npm test
+npm run verify:package
+TARBALL=$(npm pack --silent)
+npm install -g "./$TARBALL"
+stacklens /path/to/project
+```
+
+For development from a checkout:
+
+```bash
+npm link
+stacklens .
+npm unlink -g stacklens
+```
+
+To publish it to npm after logging in:
+
+```bash
+npm publish
 ```
 
 ## Current rule packs
@@ -128,6 +158,11 @@ Most tools are either linters, vulnerability scanners, or heavyweight platforms.
 
 - Strategy: build one focused rule pack at a time. Starting every language at once would make the checks shallow.
 - Additional package-style rule packs:
+  - `@stacklens/quarkus`
+    - Quarkus Maven/Gradle and extension detection
+    - `application.properties` and profile-specific production warnings
+    - Camel and Artemis configuration risk hints
+    - OpenShift route/deployment and Argo CD manifest checks
   - `@stacklens/angular`
     - environment file drift
     - production build config issues
