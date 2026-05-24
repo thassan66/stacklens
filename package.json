@@ -29,6 +29,11 @@
     "argocd",
     "helm",
     "kustomize",
+    "aws",
+    "azure",
+    "terraform",
+    "jenkins",
+    "docker",
     "nodejs",
     "devops"
   ],

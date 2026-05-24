@@ -101,9 +101,9 @@ npm publish
 - **`@stacklens/common`**
   - Docker and Compose port/mount hints
   - GitHub Actions `write-all` and `pull_request_target` checks
-  - Kubernetes, OpenShift, Argo CD, Helm, and Kustomize deployment checks
-  - mutable image tags, privileged containers, plain env secrets, committed Secrets
-  - Helm values secrets and Kustomize remote resource hints
+  - Kubernetes, OpenShift, Argo CD, Helm, Kustomize, Jenkins, Terraform, AWS, and Azure deployment checks
+  - mutable image tags, privileged containers, plain env secrets, committed Secrets, and public ingress hints
+  - Helm values, Kustomize overlays, Jenkins pipelines, Terraform, CloudFormation/SAM, and Azure pipeline/template hints
 
 ## CLI
 

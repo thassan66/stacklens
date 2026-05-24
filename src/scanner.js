@@ -140,6 +140,8 @@ function isInterestingPath(relativePath) {
       "build.gradle",
       "build.gradle.kts",
       "gradle.properties",
+      "Jenkinsfile",
+      "Jenkinsfile.groovy",
       "Dockerfile",
       "docker-compose.yml",
       "docker-compose.yaml",
@@ -177,11 +179,22 @@ function isInterestingPath(relativePath) {
       "kustomization.yaml",
       "kustomization.yml",
       "values.yaml",
-      "values.yml"
+      "values.yml",
+      "azure-pipelines.yaml",
+      "azure-pipelines.yml",
+      "cloudformation.yaml",
+      "cloudformation.yml",
+      "serverless.yaml",
+      "serverless.yml",
+      "template.yaml",
+      "template.yml"
     ].includes(basename) ||
     /^\.env(\.[\w.-]+)?$/i.test(basename) ||
     /^(Chart|values)([-.\w]*)?\.ya?ml$/i.test(basename) ||
-    /(^|\/)(src\/main\/kubernetes|k8s|kubernetes|openshift|deploy|deployments|manifests|argocd|\.argocd|helm|charts)\/.+\.(ya?ml|json)$/i.test(relativePath) ||
+    /^Jenkinsfile(\..+)?$/i.test(basename) ||
+    /\.tf(vars)?(\.json)?$/i.test(basename) ||
+    /\.bicep$/i.test(basename) ||
+    /(^|\/)(src\/main\/kubernetes|k8s|kubernetes|openshift|deploy|deployments|manifests|argocd|\.argocd|helm|charts|infra|infrastructure|terraform|tf|cloudformation|cfn|aws|azure|bicep|pipelines|ci|cd|jenkins)\/.+\.(ya?ml|json|tf|tfvars|bicep|groovy)$/i.test(relativePath) ||
     /(^|\/)src\/.+\.vue$/i.test(relativePath) ||
     /(^|\/)src\/.+\.[cm]?[jt]sx?$/i.test(relativePath) ||
     /(^|\/)application([-.\w]*)\.(properties|ya?ml)$/i.test(relativePath) ||

@@ -15,7 +15,12 @@ export const rulePacks = [
       ...(result.hasOpenShift ? ["OpenShift"] : []),
       ...(result.hasArgoCd ? ["Argo CD"] : []),
       ...(result.hasHelm ? ["Helm"] : []),
-      ...(result.hasKustomize ? ["Kustomize"] : [])
+      ...(result.hasKustomize ? ["Kustomize"] : []),
+      ...(result.hasJenkins ? ["Jenkins"] : []),
+      ...(result.hasTerraform ? ["Terraform"] : []),
+      ...(result.hasAws ? ["AWS"] : []),
+      ...(result.hasAzure ? ["Azure"] : []),
+      ...(result.hasDocker ? ["Docker"] : [])
     ]
   },
   {
