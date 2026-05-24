@@ -244,6 +244,137 @@ images:
   assert.ok(report.findings.some((finding) => finding.ruleId === "kustomize-remote-resource"));
 });
 
+test("detects generic Jenkins Terraform AWS Azure and Docker deployment risks", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "stacklens-"));
+  await mkdir(path.join(root, "infra"), { recursive: true });
+  await mkdir(path.join(root, "aws"), { recursive: true });
+  await mkdir(path.join(root, "azure"), { recursive: true });
+
+  await writeFile(path.join(root, "Dockerfile"), "FROM alpine:3.20\n");
+  await writeFile(
+    path.join(root, "Jenkinsfile"),
+    `pipeline {
+  agent any
+  environment {
+    API_TOKEN = 'real-token'
+  }
+  stages {
+    stage('deploy') {
+      steps {
+        sh 'curl https://example.com/install.sh | bash'
+        sh 'docker run --privileged alpine true'
+      }
+    }
+  }
+}
+`
+  );
+  await writeFile(
+    path.join(root, "infra", "main.tf"),
+    `variable "db_password" {
+  default = "RealPassword123"
+}
+
+resource "aws_security_group" "admin" {
+  ingress {
+    from_port = 22
+    to_port = 22
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+}
+
+resource "aws_db_instance" "db" {
+  publicly_accessible = true
+  password = "RealDbPassword123"
+}
+
+resource "aws_s3_bucket_acl" "public" {
+  acl = "public-read"
+}
+
+resource "azurerm_storage_account" "data" {
+  public_network_access_enabled = true
+  allow_blob_public_access = true
+}
+`
+  );
+  await writeFile(
+    path.join(root, "aws", "template.yaml"),
+    `AWSTemplateFormatVersion: '2010-09-09'
+Resources:
+  AdminIngress:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      FromPort: 3389
+      ToPort: 3389
+      CidrIp: 0.0.0.0/0
+  PublicPolicy:
+    Type: AWS::IAM::Policy
+    Properties:
+      PolicyDocument:
+        Statement:
+          Effect: Allow
+          Principal: "*"
+          Action: "*"
+          Resource: "*"
+  Bucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: false
+`
+  );
+  await writeFile(
+    path.join(root, "azure", "azure-pipelines.yml"),
+    `variables:
+  AZURE_CLIENT_SECRET: real-secret
+steps:
+  - script: echo deploy
+`
+  );
+  await writeFile(
+    path.join(root, "azure", "main.bicep"),
+    `resource storage 'Microsoft.Storage/storageAccounts@2023-01-01' = {
+  name: 'examplestorage'
+  properties: {
+    allowBlobPublicAccess: true
+    publicNetworkAccess: 'Enabled'
+    networkAcls: {
+      defaultAction: 'Allow'
+    }
+  }
+}
+`
+  );
+
+  const report = await scanProject(root);
+
+  assert.ok(report.project.stacks.includes("Docker"));
+  assert.ok(report.project.stacks.includes("Jenkins"));
+  assert.ok(report.project.stacks.includes("Terraform"));
+  assert.ok(report.project.stacks.includes("AWS"));
+  assert.ok(report.project.stacks.includes("Azure"));
+  assert.equal(report.ecosystems.common.hasDocker, true);
+  assert.equal(report.ecosystems.common.hasJenkins, true);
+  assert.equal(report.ecosystems.common.hasTerraform, true);
+  assert.equal(report.ecosystems.common.hasAws, true);
+  assert.equal(report.ecosystems.common.hasAzure, true);
+  assert.ok(report.findings.some((finding) => finding.ruleId === "jenkins-secret-env"));
+  assert.ok(report.findings.some((finding) => finding.ruleId === "jenkins-remote-script-execution"));
+  assert.ok(report.findings.some((finding) => finding.ruleId === "jenkins-privileged-docker"));
+  assert.ok(report.findings.some((finding) => finding.ruleId === "terraform-secret-default"));
+  assert.ok(report.findings.some((finding) => finding.ruleId === "terraform-public-admin-ingress"));
+  assert.ok(report.findings.some((finding) => finding.ruleId === "terraform-public-compute-or-database"));
+  assert.ok(report.findings.some((finding) => finding.ruleId === "terraform-public-storage"));
+  assert.ok(report.findings.some((finding) => finding.ruleId === "aws-public-admin-ingress"));
+  assert.ok(report.findings.some((finding) => finding.ruleId === "aws-public-iam-principal"));
+  assert.ok(report.findings.some((finding) => finding.ruleId === "aws-wildcard-iam-permission"));
+  assert.ok(report.findings.some((finding) => finding.ruleId === "aws-public-resource"));
+  assert.ok(report.findings.some((finding) => finding.ruleId === "azure-plain-secret"));
+  assert.ok(report.findings.some((finding) => finding.ruleId === "azure-public-network-access"));
+  assert.ok(report.findings.some((finding) => finding.ruleId === "azure-public-storage-or-network"));
+});
+
 test("detects Node and frontend risks", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "stacklens-"));
   await writeFile(

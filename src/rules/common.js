@@ -3,11 +3,14 @@ import { collectDeploymentFiles, detectDeploymentSignals, scanDeployments } from
 export function scanCommon(context) {
   const deploymentFiles = collectDeploymentFiles(context);
   const deploymentSignals = detectDeploymentSignals(deploymentFiles);
+  const dockerFiles = collectDockerFiles(context);
 
   return {
     detected: true,
     ...deploymentSignals,
+    hasDocker: dockerFiles.length > 0,
     deploymentFileCount: deploymentFiles.length,
+    dockerFileCount: dockerFiles.length,
     findings: [
       ...scanDocker(context),
       ...scanGitHubActions(context),
@@ -18,9 +21,7 @@ export function scanCommon(context) {
 
 function scanDocker(context) {
   const findings = [];
-  const dockerFiles = context.files.filter((file) =>
-    /(^|\/)(Dockerfile|docker-compose\.ya?ml|compose\.ya?ml)$/i.test(file.relativePath)
-  );
+  const dockerFiles = collectDockerFiles(context);
 
   for (const file of dockerFiles) {
     for (const line of file.lines) {
@@ -53,6 +54,12 @@ function scanDocker(context) {
   }
 
   return findings;
+}
+
+function collectDockerFiles(context) {
+  return context.files.filter((file) =>
+    /(^|\/)(Dockerfile|docker-compose\.ya?ml|compose\.ya?ml)$/i.test(file.relativePath)
+  );
 }
 
 function scanGitHubActions(context) {

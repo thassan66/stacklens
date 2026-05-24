@@ -1,5 +1,5 @@
-const deploymentPathPattern = /(^|\/)(src\/main\/kubernetes|k8s|kubernetes|openshift|deploy|deployments|manifests|argocd|\.argocd|helm|charts)\/.+\.(ya?ml|json)$/i;
-const deploymentBasenamePattern = /^(chart|deployment|deploymentconfig|route|service|secret|kustomization|values)([-.\w]*)?\.ya?ml$/i;
+const deploymentPathPattern = /(^|\/)(src\/main\/kubernetes|k8s|kubernetes|openshift|deploy|deployments|manifests|argocd|\.argocd|helm|charts|infra|infrastructure|terraform|tf|cloudformation|cfn|aws|azure|bicep|pipelines|ci|cd|jenkins)\/.+\.(ya?ml|json|tf|tfvars|bicep|groovy)$/i;
+const deploymentBasenamePattern = /^(?:(chart|deployment|deploymentconfig|route|service|secret|kustomization|values|cloudformation|serverless|template)([-.\w]*)?\.ya?ml|Jenkinsfile(\..+)?|azure-pipelines\.ya?ml|.+\.tf|.+\.tfvars(\.json)?|.+\.bicep)$/i;
 const secretKeyPattern = /(password|passwd|secret|token|api[-_.]?key|private[-_.]?key|client[-_.]?secret|access[-_.]?key)/i;
 
 export function scanDeployments(context) {
@@ -11,7 +11,11 @@ export function scanDeployments(context) {
     ...scanContainerManifest(context, file),
     ...scanArgoApplication(context, file),
     ...scanHelmValues(context, file),
-    ...scanKustomize(context, file)
+    ...scanKustomize(context, file),
+    ...scanJenkins(context, file),
+    ...scanTerraform(context, file),
+    ...scanAwsManifest(context, file),
+    ...scanAzureManifest(context, file)
   ]);
 }
 
@@ -24,7 +28,11 @@ export function detectDeploymentSignals(files) {
     hasOpenShift: files.some((file) => /route\.openshift\.io|kind:\s*(Route|DeploymentConfig)\b|openshift/i.test(file.content)),
     hasArgoCd: files.some((file) => /argoproj\.io\/v1alpha1|kind:\s*Application\b/i.test(file.content)),
     hasHelm: files.some((file) => /(^|\/)(Chart|values)([-.\w]*)?\.ya?ml$/i.test(file.relativePath) || /(^|\/)(helm|charts)\//i.test(file.relativePath)),
-    hasKustomize: files.some((file) => /(^|\/)kustomization\.ya?ml$/i.test(file.relativePath))
+    hasKustomize: files.some((file) => /(^|\/)kustomization\.ya?ml$/i.test(file.relativePath)),
+    hasJenkins: files.some(isJenkinsFile),
+    hasTerraform: files.some(isTerraformFile),
+    hasAws: files.some(isAwsFile),
+    hasAzure: files.some(isAzureFile)
   };
 }
 
@@ -305,8 +313,273 @@ function scanKustomize(context, file) {
   return findings;
 }
 
+function scanJenkins(context, file) {
+  if (!isJenkinsFile(file)) return [];
+
+  const findings = [];
+  for (const line of file.lines) {
+    if (/\b(curl|wget)\b[^|;&\n]*\|\s*(bash|sh|zsh|node|python)\b/i.test(line.text)) {
+      findings.push(context.finding({
+        severity: "high",
+        file: file.relativePath,
+        line: line.number,
+        category: "Jenkins",
+        ruleId: "jenkins-remote-script-execution",
+        title: "Jenkins pipeline downloads and executes remote code",
+        message: "Piping network content into an interpreter is risky in CI/CD jobs.",
+        snippet: line.text.trim()
+      }));
+    }
+
+    if (/\bdocker\s+run\b.*--privileged|--privileged.*\bdocker\s+run\b/i.test(line.text)) {
+      findings.push(context.finding({
+        severity: "high",
+        file: file.relativePath,
+        line: line.number,
+        category: "Jenkins",
+        ruleId: "jenkins-privileged-docker",
+        title: "Jenkins pipeline runs a privileged Docker container",
+        message: "Privileged containers in CI can expose the worker host and credentials.",
+        snippet: line.text.trim()
+      }));
+    }
+
+    const secret = findSecretAssignment(line.text);
+    if (secret && !/credentials\s*\(/i.test(line.text)) {
+      findings.push(context.finding({
+        severity: "high",
+        file: file.relativePath,
+        line: line.number,
+        category: "Jenkins",
+        ruleId: "jenkins-secret-env",
+        title: "Jenkins pipeline contains a plain secret-like value",
+        message: "Use Jenkins credentials bindings instead of hardcoded pipeline secrets.",
+        snippet: `${secret.key}=********`
+      }));
+    }
+  }
+
+  return findings;
+}
+
+function scanTerraform(context, file) {
+  if (!isTerraformFile(file)) return [];
+
+  const findings = [];
+  for (const [index, line] of file.lines.entries()) {
+    const text = line.text.trim();
+    const secret = findSecretAssignment(text);
+    if (secret) {
+      findings.push(context.finding({
+        severity: "high",
+        file: file.relativePath,
+        line: line.number,
+        category: "Terraform",
+        ruleId: "terraform-secret-default",
+        title: "Terraform file contains a secret-like literal",
+        message: "Use variables without committed defaults, secret stores, or CI-provided values for Terraform credentials.",
+        snippet: `${secret.key}=********`
+      }));
+    }
+
+    const defaultValue = text.match(/\bdefault\s*=\s*["']([^"']+)["']/i);
+    if (defaultValue && hasConcreteSecret(defaultValue[1]) && nearbyText(file, index, 5).some((nearby) => secretKeyPattern.test(nearby))) {
+      findings.push(context.finding({
+        severity: "high",
+        file: file.relativePath,
+        line: line.number,
+        category: "Terraform",
+        ruleId: "terraform-secret-default",
+        title: "Terraform variable contains a secret-like default",
+        message: "Use variables without committed defaults, secret stores, or CI-provided values for Terraform credentials.",
+        snippet: "default=********"
+      }));
+    }
+
+    if (/cidr_blocks\s*=\s*\[[^\]]*"0\.0\.0\.0\/0"|ipv6_cidr_blocks\s*=\s*\[[^\]]*"::\/0"/i.test(text)) {
+      const isAdminPort = nearbyText(file, index, 8).some((nearby) => /\b(from_port|to_port)\s*=\s*(22|3389)\b/i.test(nearby));
+      findings.push(context.finding({
+        severity: isAdminPort ? "high" : "medium",
+        file: file.relativePath,
+        line: line.number,
+        category: "Terraform",
+        ruleId: isAdminPort ? "terraform-public-admin-ingress" : "terraform-public-ingress",
+        title: isAdminPort ? "Terraform exposes an admin port to the internet" : "Terraform allows public network ingress",
+        message: "Public ingress should be scoped to expected source ranges, especially for administrative ports.",
+        snippet: text
+      }));
+    }
+
+    if (/\b(publicly_accessible|associate_public_ip_address|map_public_ip_on_launch)\s*=\s*true\b/i.test(text)) {
+      findings.push(context.finding({
+        severity: "medium",
+        file: file.relativePath,
+        line: line.number,
+        category: "Terraform",
+        ruleId: "terraform-public-compute-or-database",
+        title: "Terraform enables public network exposure",
+        message: "Public IP or public database exposure should be intentional and protected by network policy.",
+        snippet: text
+      }));
+    }
+
+    if (/\bacl\s*=\s*"public-read"|\bblock_public_(acls|policy)\s*=\s*false|\bignore_public_acls\s*=\s*false|\brestrict_public_buckets\s*=\s*false/i.test(text)) {
+      findings.push(context.finding({
+        severity: "high",
+        file: file.relativePath,
+        line: line.number,
+        category: "Terraform",
+        ruleId: "terraform-public-storage",
+        title: "Terraform may allow public storage access",
+        message: "Public storage access should be blocked unless the bucket or account is explicitly designed for public assets.",
+        snippet: text
+      }));
+    }
+  }
+
+  return findings;
+}
+
+function scanAwsManifest(context, file) {
+  if (!isAwsFile(file)) return [];
+
+  const findings = [];
+  for (const [index, line] of file.lines.entries()) {
+    const text = line.text.trim();
+
+    if (/\b(CidrIp|CidrIpv6)\s*:\s*["']?(0\.0\.0\.0\/0|::\/0)["']?/i.test(text) || /"CidrIp"\s*:\s*"0\.0\.0\.0\/0"/i.test(text)) {
+      const isAdminPort = nearbyText(file, index, 8).some((nearby) => /\b(FromPort|ToPort)\s*:\s*(22|3389)\b|"(FromPort|ToPort)"\s*:\s*(22|3389)/i.test(nearby));
+      findings.push(context.finding({
+        severity: isAdminPort ? "high" : "medium",
+        file: file.relativePath,
+        line: line.number,
+        category: "AWS",
+        ruleId: isAdminPort ? "aws-public-admin-ingress" : "aws-public-ingress",
+        title: isAdminPort ? "AWS template exposes an admin port to the internet" : "AWS template allows public ingress",
+        message: "Public ingress should be scoped to expected source ranges, especially for administrative ports.",
+        snippet: text
+      }));
+    }
+
+    if (/\bPrincipal\s*:\s*["']?\*["']?|"\s*Principal\s*"\s*:\s*"\*"/i.test(text)) {
+      findings.push(context.finding({
+        severity: "high",
+        file: file.relativePath,
+        line: line.number,
+        category: "AWS",
+        ruleId: "aws-public-iam-principal",
+        title: "AWS policy allows a wildcard principal",
+        message: "Wildcard principals can grant access outside the intended account or workload boundary.",
+        snippet: text
+      }));
+    }
+
+    if (/\b(PubliclyAccessible)\s*:\s*true\b|\b(BlockPublicAcls|BlockPublicPolicy|IgnorePublicAcls|RestrictPublicBuckets)\s*:\s*false\b/i.test(text)) {
+      findings.push(context.finding({
+        severity: "high",
+        file: file.relativePath,
+        line: line.number,
+        category: "AWS",
+        ruleId: "aws-public-resource",
+        title: "AWS template enables public resource exposure",
+        message: "Public database or storage access should be avoided unless it is explicitly required and controlled.",
+        snippet: text
+      }));
+    }
+  }
+
+  if (hasWildcardIamStatement(file.content)) {
+    findings.push(context.finding({
+      severity: "high",
+      file: file.relativePath,
+      line: findLine(file.content, "Action:"),
+      category: "AWS",
+      ruleId: "aws-wildcard-iam-permission",
+      title: "AWS policy appears to allow wildcard permissions",
+      message: "Wildcard Action and Resource permissions should be narrowed to the least privilege needed.",
+      snippet: "Action/Resource wildcard policy"
+    }));
+  }
+
+  return findings;
+}
+
+function scanAzureManifest(context, file) {
+  if (!isAzureFile(file)) return [];
+
+  const findings = [];
+  const shouldScanSecrets = !isTerraformFile(file);
+
+  for (const line of file.lines) {
+    const text = line.text.trim();
+    const secret = findSecretAssignment(text);
+
+    if (shouldScanSecrets && secret) {
+      findings.push(context.finding({
+        severity: "high",
+        file: file.relativePath,
+        line: line.number,
+        category: "Azure",
+        ruleId: "azure-plain-secret",
+        title: "Azure deployment file contains a plain secret-like value",
+        message: "Use secret variables, Key Vault references, or deployment-time injection instead of committed secrets.",
+        snippet: `${secret.key}=********`
+      }));
+    }
+
+    if (/\b(publicNetworkAccess|public_network_access_enabled)\s*[:=]\s*["']?(Enabled|true)["']?/i.test(text)) {
+      findings.push(context.finding({
+        severity: "medium",
+        file: file.relativePath,
+        line: line.number,
+        category: "Azure",
+        ruleId: "azure-public-network-access",
+        title: "Azure resource enables public network access",
+        message: "Public network access should be restricted unless the resource is intentionally internet-facing.",
+        snippet: text
+      }));
+    }
+
+    if (/\b(allowBlobPublicAccess|allow_blob_public_access)\s*[:=]\s*true\b|\bdefaultAction\s*:\s*Allow\b/i.test(text)) {
+      findings.push(context.finding({
+        severity: "high",
+        file: file.relativePath,
+        line: line.number,
+        category: "Azure",
+        ruleId: "azure-public-storage-or-network",
+        title: "Azure deployment allows broad storage or network access",
+        message: "Storage public access and default-allow network ACLs should be avoided for production resources.",
+        snippet: text
+      }));
+    }
+  }
+
+  return findings;
+}
+
 function isHelmValuesFile(file) {
   return /(^|\/)values([-.\w]*)?\.ya?ml$/i.test(file.relativePath);
+}
+
+function isJenkinsFile(file) {
+  return /^Jenkinsfile(\..+)?$/i.test(basename(file.relativePath)) || /(^|\/)jenkins\/.+\.(groovy|jenkinsfile)$/i.test(file.relativePath);
+}
+
+function isTerraformFile(file) {
+  return /\.tf(vars)?(\.json)?$/i.test(file.relativePath);
+}
+
+function isAwsFile(file) {
+  return /(^|\/)(aws|cloudformation|cfn)\//i.test(file.relativePath) ||
+    /(^|\/)(cloudformation|template|serverless)([-.\w]*)?\.(ya?ml|json)$/i.test(file.relativePath) ||
+    /\b(AWSTemplateFormatVersion|AWS::|aws_)/i.test(file.content);
+}
+
+function isAzureFile(file) {
+  return /(^|\/)(azure|bicep)\//i.test(file.relativePath) ||
+    /(^|\/)azure-pipelines\.ya?ml$/i.test(file.relativePath) ||
+    /\.bicep$/i.test(file.relativePath) ||
+    /\b(azurerm_|Microsoft\.|AzureCLI@|AzurePowerShell@)/i.test(file.content);
 }
 
 function parseYamlKeyValue(text) {
@@ -326,6 +599,12 @@ function isNearSection(index, sectionIndexes, maxDistance) {
   return sectionIndexes.length === 0 || sectionIndexes.some((sectionIndex) => index > sectionIndex && index - sectionIndex <= maxDistance);
 }
 
+function nearbyText(file, index, distance) {
+  const start = Math.max(0, index - distance);
+  const end = Math.min(file.lines.length, index + distance + 1);
+  return file.lines.slice(start, end).map((line) => line.text);
+}
+
 function isMutableImageRef(image) {
   if (image.includes("@sha256:")) return false;
   const imageName = image.split("/").at(-1) ?? image;
@@ -341,6 +620,25 @@ function hasConcreteSecret(value) {
     !/^\{\{[^}]+}}$/.test(trimmed) &&
     !/^<[^>]+>$/.test(trimmed) &&
     !/^(changeme|example|dummy|test|password|secret|token|placeholder|your[-_]?value)$/i.test(trimmed)
+  );
+}
+
+function findSecretAssignment(text) {
+  const assignment = text.match(/([A-Za-z0-9_.-]*(?:password|passwd|secret|token|api[-_.]?key|private[-_.]?key|client[-_.]?secret|access[-_.]?key)[A-Za-z0-9_.-]*)\s*(?:=|:)\s*["']?([^"',\]\s}]+)["']?/i);
+  if (!assignment) return null;
+
+  const key = assignment[1];
+  const value = assignment[2];
+  if (!hasConcreteSecret(value)) return null;
+  return { key, value };
+}
+
+function hasWildcardIamStatement(content) {
+  const statements = content.split(/\bStatement\b/i);
+  return statements.some((statement) =>
+    /\bEffect\s*:\s*Allow\b|"Effect"\s*:\s*"Allow"/i.test(statement) &&
+    (/\bAction\s*:\s*["']?\*["']?|"Action"\s*:\s*"\*"/i.test(statement) || /-\s*["']?\*["']?/i.test(statement)) &&
+    (/\bResource\s*:\s*["']?\*["']?|"Resource"\s*:\s*"\*"/i.test(statement) || /-\s*["']?\*["']?/i.test(statement))
   );
 }
 
