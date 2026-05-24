@@ -100,6 +100,8 @@ test("detects Quarkus Camel Artemis and deployment risks", async () => {
     path.join(root, "src", "main", "resources", "application-prod.properties"),
     `%prod.quarkus.http.insecure-requests=enabled
 %prod.quarkus.datasource.password=RealDbPassword123
+%prod.quarkus.rest-client.inventory.url=https://user:pass@example.com
+%prod.quarkus.messaging.broker-url=tcp://events:61616
 %prod.quarkus.artemis.url=tcp://broker:61616
 %prod.quarkus.artemis.password=RealBrokerPassword123
 %prod.quarkus.artemis.devservices.enabled=true
@@ -171,6 +173,8 @@ spec:
   assert.ok(report.findings.some((finding) => finding.ruleId === "quarkus-debug-logging-prod"));
   assert.ok(report.findings.some((finding) => finding.ruleId === "camel-tracing-prod"));
   assert.ok(report.findings.some((finding) => finding.ruleId === "camel-endpoint-credentials"));
+  assert.ok(report.findings.some((finding) => finding.ruleId === "quarkus-endpoint-credentials"));
+  assert.ok(report.findings.some((finding) => finding.ruleId === "quarkus-plain-tcp-endpoint"));
   assert.ok(report.findings.some((finding) => finding.ruleId === "artemis-plain-tcp-url"));
   assert.ok(report.findings.some((finding) => finding.ruleId === "openshift-route-without-tls"));
   assert.ok(report.findings.some((finding) => finding.ruleId === "kubernetes-mutable-image-tag"));
@@ -178,6 +182,66 @@ spec:
   assert.ok(report.findings.some((finding) => finding.ruleId === "kubernetes-env-secret"));
   assert.ok(report.findings.some((finding) => finding.ruleId === "argocd-mutable-target-revision"));
   assert.ok(report.findings.some((finding) => finding.ruleId === "argocd-auto-prune-enabled"));
+});
+
+test("detects generic deployment Helm and Kustomize risks", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "stacklens-"));
+  await mkdir(path.join(root, "k8s"), { recursive: true });
+  await mkdir(path.join(root, "helm"), { recursive: true });
+
+  await writeFile(
+    path.join(root, "k8s", "deployment.yaml"),
+    `apiVersion: apps/v1
+kind: Deployment
+spec:
+  template:
+    spec:
+      containers:
+        - name: api
+          image: registry.example.com/team/api:latest
+          env:
+            - name: API_TOKEN
+              value: real-token
+`
+  );
+  await writeFile(
+    path.join(root, "helm", "Chart.yaml"),
+    "apiVersion: v2\nname: api\nversion: 0.1.0\n"
+  );
+  await writeFile(
+    path.join(root, "helm", "values-prod.yaml"),
+    `image:
+  repository: registry.example.com/team/api
+  tag: latest
+  pullPolicy: Always
+database:
+  password: RealDbPassword123
+`
+  );
+  await writeFile(
+    path.join(root, "kustomization.yaml"),
+    `resources:
+  - https://github.com/example/platform//base?ref=main
+images:
+  - name: registry.example.com/team/api
+    newTag: latest
+`
+  );
+
+  const report = await scanProject(root);
+
+  assert.ok(report.project.stacks.includes("Helm"));
+  assert.ok(report.project.stacks.includes("Kustomize"));
+  assert.ok(!report.project.stacks.includes("Quarkus"));
+  assert.equal(report.ecosystems.common.hasHelm, true);
+  assert.equal(report.ecosystems.common.hasKustomize, true);
+  assert.ok(report.findings.some((finding) => finding.ruleId === "kubernetes-mutable-image-tag"));
+  assert.ok(report.findings.some((finding) => finding.ruleId === "kubernetes-env-secret"));
+  assert.ok(report.findings.some((finding) => finding.ruleId === "helm-mutable-image-tag"));
+  assert.ok(report.findings.some((finding) => finding.ruleId === "helm-image-pull-always"));
+  assert.ok(report.findings.some((finding) => finding.ruleId === "helm-values-secret"));
+  assert.ok(report.findings.some((finding) => finding.ruleId === "kustomize-mutable-image-tag"));
+  assert.ok(report.findings.some((finding) => finding.ruleId === "kustomize-remote-resource"));
 });
 
 test("detects Node and frontend risks", async () => {

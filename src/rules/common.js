@@ -1,8 +1,19 @@
+import { collectDeploymentFiles, detectDeploymentSignals, scanDeployments } from "./deployment.js";
+
 export function scanCommon(context) {
-  return [
-    ...scanDocker(context),
-    ...scanGitHubActions(context)
-  ];
+  const deploymentFiles = collectDeploymentFiles(context);
+  const deploymentSignals = detectDeploymentSignals(deploymentFiles);
+
+  return {
+    detected: true,
+    ...deploymentSignals,
+    deploymentFileCount: deploymentFiles.length,
+    findings: [
+      ...scanDocker(context),
+      ...scanGitHubActions(context),
+      ...scanDeployments(context)
+    ]
+  };
 }
 
 function scanDocker(context) {

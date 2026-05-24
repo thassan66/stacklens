@@ -30,6 +30,7 @@ export async function scanProject(projectPath) {
   const files = await collectReadableFiles(root);
   const context = createContext(root, files);
   const packResults = runRulePacks(context);
+  const common = getPackResult(packResults, "common");
   const spring = getPackResult(packResults, "spring");
   const quarkus = getPackResult(packResults, "quarkus");
   const node = getPackResult(packResults, "node");
@@ -47,6 +48,7 @@ export async function scanProject(projectPath) {
     },
     rulePacks: listRulePackSummaries(packResults),
     ecosystems: {
+      common: omitFindings(common),
       spring: omitFindings(spring),
       quarkus: omitFindings(quarkus),
       node: omitFindings(node),
@@ -170,12 +172,15 @@ function isInterestingPath(relativePath) {
       "service.yml",
       "secret.yaml",
       "secret.yml",
+      "Chart.yaml",
+      "Chart.yml",
       "kustomization.yaml",
       "kustomization.yml",
       "values.yaml",
       "values.yml"
     ].includes(basename) ||
     /^\.env(\.[\w.-]+)?$/i.test(basename) ||
+    /^(Chart|values)([-.\w]*)?\.ya?ml$/i.test(basename) ||
     /(^|\/)(src\/main\/kubernetes|k8s|kubernetes|openshift|deploy|deployments|manifests|argocd|\.argocd|helm|charts)\/.+\.(ya?ml|json)$/i.test(relativePath) ||
     /(^|\/)src\/.+\.vue$/i.test(relativePath) ||
     /(^|\/)src\/.+\.[cm]?[jt]sx?$/i.test(relativePath) ||

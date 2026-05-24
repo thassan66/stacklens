@@ -10,8 +10,13 @@ export const rulePacks = [
     id: "@stacklens/common",
     name: "Common",
     ecosystem: "common",
-    scan: (context) => ({ detected: true, findings: scanCommon(context) }),
-    stacks: () => []
+    scan: scanCommon,
+    stacks: (result) => [
+      ...(result.hasOpenShift ? ["OpenShift"] : []),
+      ...(result.hasArgoCd ? ["Argo CD"] : []),
+      ...(result.hasHelm ? ["Helm"] : []),
+      ...(result.hasKustomize ? ["Kustomize"] : [])
+    ]
   },
   {
     id: "@stacklens/spring",

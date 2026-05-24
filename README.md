@@ -73,10 +73,8 @@ npm publish
 - **`@stacklens/quarkus`**
   - Maven/Gradle and Quarkus extension detection
   - production profile config warnings
-  - Camel endpoint credential and tracing hints
-  - Artemis credential and broker URL hints
-  - OpenShift Route, image, container security, and env secret checks
-  - Argo CD mutable revision and automated prune hints
+  - generic endpoint credential and plain TCP hints
+  - Camel tracing and Artemis credential/broker URL hints
 
 - **`@stacklens/node`**
   - risky package lifecycle scripts
@@ -103,6 +101,9 @@ npm publish
 - **`@stacklens/common`**
   - Docker and Compose port/mount hints
   - GitHub Actions `write-all` and `pull_request_target` checks
+  - Kubernetes, OpenShift, Argo CD, Helm, and Kustomize deployment checks
+  - mutable image tags, privileged containers, plain env secrets, committed Secrets
+  - Helm values secrets and Kustomize remote resource hints
 
 ## CLI
 

@@ -1,5 +1,6 @@
+import { collectDeploymentFiles, detectDeploymentSignals } from "./deployment.js";
+
 const applicationConfigPattern = /(^|\/)application([-.\w]*)\.(properties|ya?ml)$/i;
-const manifestPathPattern = /(^|\/)(src\/main\/kubernetes|k8s|kubernetes|openshift|deploy|deployments|manifests|argocd|\.argocd|helm|charts)\/.+\.(ya?ml|json)$/i;
 const secretKeyPattern = /(password|passwd|secret|token|api[-_.]?key|private[-_.]?key|client[-_.]?secret|access[-_.]?key)/i;
 
 export function scanQuarkus(context) {
@@ -13,8 +14,8 @@ export function scanQuarkus(context) {
   }
 
   const extensions = uniqueValues(builds.flatMap((build) => build.extensions));
-  const manifestFiles = context.files.filter(isManifestFile);
-  const deploymentSignals = detectDeploymentSignals(manifestFiles);
+  const deploymentFiles = collectDeploymentFiles(context);
+  const deploymentSignals = detectDeploymentSignals(deploymentFiles);
   const usesCamel = extensions.some((extension) => extension.startsWith("camel-quarkus-")) ||
     configEntries.some((entry) => entry.key.startsWith("camel."));
   const usesArtemis = extensions.some((extension) => /artemis|pooled-jms|jms/i.test(extension)) ||
@@ -34,12 +35,13 @@ export function scanQuarkus(context) {
     usesArtemis,
     hasOpenShift: deploymentSignals.hasOpenShift,
     hasArgoCd: deploymentSignals.hasArgoCd,
+    hasHelm: deploymentSignals.hasHelm,
+    hasKustomize: deploymentSignals.hasKustomize,
     configFileCount: configFiles.length,
-    manifestFileCount: manifestFiles.length,
+    manifestFileCount: deploymentFiles.length,
     findings: [
       ...builds.flatMap((build) => scanBuild(context, build)),
-      ...scanConfigs(context, configEntries),
-      ...scanManifests(context, manifestFiles)
+      ...scanConfigs(context, configEntries)
     ]
   };
 }
@@ -216,230 +218,37 @@ function scanConfigs(context, entries) {
       }));
     }
 
-    if (key.startsWith("camel.") && /(uri|url|broker|endpoint)/i.test(key) && hasCredentialInUri(value)) {
+    if (/(uri|url|broker|endpoint|connection)/i.test(key) && hasCredentialInUri(value)) {
+      const isCamel = key.startsWith("camel.");
+      const isMessaging = /artemis|jms|amqp/.test(key);
       findings.push(context.finding({
         severity: "high",
         file: entry.file,
         line: entry.line,
-        category: "Camel",
-        ruleId: "camel-endpoint-credentials",
-        title: "Camel endpoint URI includes credentials",
+        category: isCamel ? "Camel" : isMessaging ? "Artemis" : "Config",
+        ruleId: isCamel ? "camel-endpoint-credentials" : "quarkus-endpoint-credentials",
+        title: isCamel ? "Camel endpoint URI includes credentials" : "Endpoint URI includes credentials",
         message: "Credentials embedded in endpoint URIs can leak through config, logs, metrics, or deployment manifests.",
         snippet: `${entry.rawKey}=${redactUri(value)}`
       }));
     }
 
-    if (/artemis/i.test(key) && /(url|broker-url|connection-url)$/i.test(key) && /^tcp:\/\//i.test(stripQuotes(value)) && isProd) {
+    if (/(url|uri|broker|connection)/i.test(key) && /^tcp:\/\//i.test(stripQuotes(value)) && isProd) {
+      const isArtemis = /artemis|jms|amqp/.test(key);
       findings.push(context.finding({
         severity: "low",
         file: entry.file,
         line: entry.line,
-        category: "Artemis",
-        ruleId: "artemis-plain-tcp-url",
-        title: "Artemis broker URL uses plain TCP in production",
-        message: "Plain TCP broker connections should be reviewed when traffic can leave a trusted cluster network.",
+        category: isArtemis ? "Artemis" : "Config",
+        ruleId: isArtemis ? "artemis-plain-tcp-url" : "quarkus-plain-tcp-endpoint",
+        title: isArtemis ? "Artemis broker URL uses plain TCP in production" : "Endpoint URL uses plain TCP in production",
+        message: "Plain TCP connections should be reviewed when traffic can leave a trusted cluster network.",
         snippet: `${entry.rawKey}=${redactUri(value)}`
       }));
     }
   }
 
   return findings;
-}
-
-function scanManifests(context, manifestFiles) {
-  return manifestFiles.flatMap((file) => [
-    ...scanRoute(context, file),
-    ...scanKubernetesSecret(context, file),
-    ...scanContainerManifest(context, file),
-    ...scanArgoApplication(context, file)
-  ]);
-}
-
-function scanRoute(context, file) {
-  if (!/kind:\s*Route\b|"kind"\s*:\s*"Route"/i.test(file.content)) return [];
-
-  const findings = [];
-  if (!/^\s*tls\s*:/mi.test(file.content)) {
-    findings.push(context.finding({
-      severity: "medium",
-      file: file.relativePath,
-      line: findLine(file.content, "kind: Route"),
-      category: "OpenShift",
-      ruleId: "openshift-route-without-tls",
-      title: "OpenShift Route does not define TLS",
-      message: "Routes exposed outside the cluster should declare TLS termination unless another controlled layer handles it.",
-      snippet: "kind: Route"
-    }));
-  }
-
-  for (const line of file.lines) {
-    if (/insecureEdgeTerminationPolicy\s*:\s*Allow/i.test(line.text)) {
-      findings.push(context.finding({
-        severity: "medium",
-        file: file.relativePath,
-        line: line.number,
-        category: "OpenShift",
-        ruleId: "openshift-route-allows-insecure-edge",
-        title: "OpenShift Route allows insecure edge traffic",
-        message: "Allowing insecure traffic on TLS routes should be intentional and documented.",
-        snippet: line.text.trim()
-      }));
-    }
-  }
-
-  return findings;
-}
-
-function scanKubernetesSecret(context, file) {
-  if (!/kind:\s*Secret\b|"kind"\s*:\s*"Secret"/i.test(file.content)) return [];
-
-  const findings = [];
-  let dataIndent = null;
-
-  for (const line of file.lines) {
-    const dataMatch = line.text.match(/^(\s*)(data|stringData)\s*:\s*$/i);
-    if (dataMatch) {
-      dataIndent = dataMatch[1].length;
-      continue;
-    }
-
-    if (dataIndent === null) continue;
-
-    const indent = line.text.match(/^(\s*)/)?.[1].length ?? 0;
-    if (line.text.trim() && indent <= dataIndent) {
-      dataIndent = null;
-      continue;
-    }
-
-    const entryMatch = line.text.match(/^\s*([A-Za-z0-9_.-]+)\s*:\s*(.+)$/);
-    if (!entryMatch) continue;
-
-    const value = stripQuotes(entryMatch[2]);
-    if (!hasConcreteSecret(value)) continue;
-
-    findings.push(context.finding({
-      severity: "high",
-      file: file.relativePath,
-      line: line.number,
-      category: "Kubernetes",
-      ruleId: "kubernetes-committed-secret",
-      title: "Kubernetes Secret contains committed data",
-      message: "Secret manifests should be generated, sealed, or injected by deployment tooling instead of committed with values.",
-      snippet: `${entryMatch[1]}: ********`
-    }));
-  }
-
-  return findings;
-}
-
-function scanContainerManifest(context, file) {
-  const findings = [];
-
-  for (const line of file.lines) {
-    const imageMatch = line.text.match(/\bimage\s*:\s*["']?([^"'\s#]+)["']?/i);
-    if (imageMatch && isMutableImageRef(imageMatch[1])) {
-      findings.push(context.finding({
-        severity: "medium",
-        file: file.relativePath,
-        line: line.number,
-        category: "Kubernetes",
-        ruleId: "kubernetes-mutable-image-tag",
-        title: "Container image uses a mutable tag",
-        message: "Use immutable tags or digests so Argo CD and OpenShift deploy the reviewed image.",
-        snippet: line.text.trim()
-      }));
-    }
-
-    if (/\b(privileged|allowPrivilegeEscalation)\s*:\s*true\b|\brunAsUser\s*:\s*0\b/i.test(line.text)) {
-      findings.push(context.finding({
-        severity: "high",
-        file: file.relativePath,
-        line: line.number,
-        category: "Kubernetes",
-        ruleId: "kubernetes-privileged-container",
-        title: "Container security context is privileged",
-        message: "Privileged containers and root users should be avoided unless the workload has a documented platform exception.",
-        snippet: line.text.trim()
-      }));
-    }
-  }
-
-  findings.push(...scanEnvSecretValues(context, file));
-  return findings;
-}
-
-function scanEnvSecretValues(context, file) {
-  const findings = [];
-
-  for (let index = 0; index < file.lines.length; index += 1) {
-    const nameMatch = file.lines[index].text.match(/^\s*-\s*name\s*:\s*["']?([^"'\s#]+)["']?/i);
-    if (!nameMatch || !secretKeyPattern.test(nameMatch[1])) continue;
-
-    const lookahead = file.lines.slice(index + 1, index + 7);
-    if (lookahead.some((line) => /\bvalueFrom\s*:/i.test(line.text))) continue;
-
-    const valueLine = lookahead.find((line) => /\bvalue\s*:/i.test(line.text));
-    if (!valueLine) continue;
-
-    const value = stripQuotes(valueLine.text.replace(/^.*\bvalue\s*:\s*/i, "").trim());
-    if (!hasConcreteSecret(value)) continue;
-
-    findings.push(context.finding({
-      severity: "high",
-      file: file.relativePath,
-      line: valueLine.number,
-      category: "Kubernetes",
-      ruleId: "kubernetes-env-secret",
-      title: "Manifest env var contains a secret-like value",
-      message: "Use valueFrom with Kubernetes Secrets or OpenShift secret references instead of plain env values.",
-      snippet: `${nameMatch[1]}=********`
-    }));
-  }
-
-  return findings;
-}
-
-function scanArgoApplication(context, file) {
-  if (!/argoproj\.io\/v1alpha1/i.test(file.content) || !/kind:\s*Application\b/i.test(file.content)) return [];
-
-  const findings = [];
-  for (const line of file.lines) {
-    const revisionMatch = line.text.match(/\btargetRevision\s*:\s*["']?(HEAD|main|master)["']?/i);
-    if (revisionMatch) {
-      findings.push(context.finding({
-        severity: "medium",
-        file: file.relativePath,
-        line: line.number,
-        category: "Argo CD",
-        ruleId: "argocd-mutable-target-revision",
-        title: "Argo CD Application tracks a mutable target revision",
-        message: "Pin release tags or immutable commit SHAs for production promotion paths.",
-        snippet: line.text.trim()
-      }));
-    }
-
-    if (/\bprune\s*:\s*true\b/i.test(line.text) && /automated\s*:/i.test(file.content)) {
-      findings.push(context.finding({
-        severity: "low",
-        file: file.relativePath,
-        line: line.number,
-        category: "Argo CD",
-        ruleId: "argocd-auto-prune-enabled",
-        title: "Argo CD automated prune is enabled",
-        message: "Automated prune is useful, but production apps should pair it with clear promotion and rollback controls.",
-        snippet: line.text.trim()
-      }));
-    }
-  }
-
-  return findings;
-}
-
-function detectDeploymentSignals(files) {
-  return {
-    hasOpenShift: files.some((file) => /route\.openshift\.io|kind:\s*(Route|DeploymentConfig)\b|openshift/i.test(file.content)),
-    hasArgoCd: files.some((file) => /argoproj\.io\/v1alpha1|kind:\s*Application\b/i.test(file.content))
-  };
 }
 
 function parseApplicationConfig(file) {
@@ -502,10 +311,6 @@ function inferProfile(relativePath) {
   return match?.[1] ?? "default";
 }
 
-function isManifestFile(file) {
-  return manifestPathPattern.test(file.relativePath);
-}
-
 function isProdProfile(profile) {
   return /^(prod|production)$/i.test(profile);
 }
@@ -528,13 +333,6 @@ function hasConcreteSecret(value) {
 function hasCredentialInUri(value) {
   const text = stripQuotes(value);
   return /:\/\/[^:@/\s]+:[^@/\s]+@/.test(text) || /[?&](password|passwd|token|secret|api[-_]?key)=([^&\s]+)/i.test(text);
-}
-
-function isMutableImageRef(image) {
-  if (image.includes("@sha256:")) return false;
-  const imageName = image.split("/").at(-1) ?? image;
-  if (!imageName.includes(":")) return true;
-  return imageName.toLowerCase().endsWith(":latest");
 }
 
 function summarizeValues(values) {
